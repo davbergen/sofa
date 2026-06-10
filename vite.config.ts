@@ -13,6 +13,9 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts'],
+    // Integration smokes hit the real Claude Agent SDK; run them explicitly
+    // via `npm run test:integration` (vitest.integration.config.ts).
+    exclude: ['tests/**/*.integration.test.ts', '**/node_modules/**'],
     environment: 'node',
   },
 });

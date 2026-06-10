@@ -5,9 +5,10 @@ import { basename, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { openDb } from '../src/server/db';
 import { createApp } from '../src/server/app';
+import { FakeAgent } from '../src/server/fake-agent';
 
 function makeApp() {
-  return createApp(openDb(':memory:'));
+  return createApp(openDb(':memory:'), new FakeAgent());
 }
 
 function makeDir(prefix = 'sofa-test-') {
@@ -95,12 +96,12 @@ describe('SQLite store', () => {
     expect(existsSync(dbPath)).toBe(true);
 
     const projectDir = makeDir();
-    await open(createApp(db), projectDir);
+    await open(createApp(db, new FakeAgent()), projectDir);
     db.close();
 
     // Second run: migrations are idempotent and data survives.
     const reopened = openDb(dbPath);
-    const projects = await (await createApp(reopened).request('/api/projects')).json();
+    const projects = await (await createApp(reopened, new FakeAgent()).request('/api/projects')).json();
     expect(projects.map((p: { dir: string }) => p.dir)).toEqual([projectDir]);
   });
 });
