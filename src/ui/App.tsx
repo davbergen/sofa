@@ -8,7 +8,7 @@ interface Project {
 }
 
 interface TranscriptEntry {
-  kind: 'assistant' | 'error';
+  kind: 'assistant' | 'error' | 'resolution';
   text: string;
 }
 
@@ -20,6 +20,120 @@ interface ActiveSession {
   prompt: string;
 }
 
+interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+type PendingInteraction =
+  | {
+      kind: 'question';
+      questionId: string;
+      question: string;
+      options: QuestionOption[];
+      recommended?: string;
+    }
+  | {
+      kind: 'permission';
+      requestId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      description?: string;
+    };
+
+const OTHER = '__other__';
+
+function QuestionForm({
+  pending,
+  onSubmit,
+}: {
+  pending: Extract<PendingInteraction, { kind: 'question' }>;
+  onSubmit: (answer: string) => void;
+}) {
+  const [choice, setChoice] = useState(pending.recommended ?? pending.options[0]?.label ?? OTHER);
+  const [other, setOther] = useState('');
+
+  const answer = choice === OTHER ? other.trim() : choice;
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (answer) onSubmit(answer);
+  }
+
+  return (
+    <form
+      aria-label={`Question: ${pending.question}`}
+      onSubmit={submit}
+      style={{ border: '1px solid #ccc', borderRadius: 6, padding: '1rem', margin: '0.5rem 0' }}
+    >
+      <p style={{ marginTop: 0 }}>
+        <strong>{pending.question}</strong>
+      </p>
+      {pending.options.map((option) => (
+        <label key={option.label} style={{ display: 'block', marginBottom: '0.25rem' }}>
+          <input
+            type="radio"
+            name={`question-${pending.questionId}`}
+            checked={choice === option.label}
+            onChange={() => setChoice(option.label)}
+          />{' '}
+          {option.label}
+          {option.label === pending.recommended && <em> (recommended)</em>}
+          {option.description && <small> — {option.description}</small>}
+        </label>
+      ))}
+      <label style={{ display: 'block', marginBottom: '0.5rem' }}>
+        <input
+          type="radio"
+          name={`question-${pending.questionId}`}
+          checked={choice === OTHER}
+          onChange={() => setChoice(OTHER)}
+        />{' '}
+        Other:{' '}
+        <input
+          aria-label="Other answer"
+          value={other}
+          onChange={(e) => setOther(e.target.value)}
+          onFocus={() => setChoice(OTHER)}
+        />
+      </label>
+      <button type="submit" disabled={!answer}>
+        Answer
+      </button>
+    </form>
+  );
+}
+
+function PermissionPrompt({
+  pending,
+  onDecide,
+}: {
+  pending: Extract<PendingInteraction, { kind: 'permission' }>;
+  onDecide: (decision: 'allow' | 'deny') => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={`Permission request: ${pending.toolName}`}
+      style={{ border: '1px solid #e0a800', borderRadius: 6, padding: '1rem', margin: '0.5rem 0' }}
+    >
+      <p style={{ marginTop: 0 }}>
+        <strong>The Agent wants to run {pending.toolName}.</strong>
+      </p>
+      {pending.description && <p>{pending.description}</p>}
+      <pre style={{ background: '#f6f6f6', padding: '0.5rem', overflowX: 'auto' }}>
+        {JSON.stringify(pending.input, null, 2)}
+      </pre>
+      <button type="button" onClick={() => onDecide('allow')}>
+        Approve
+      </button>{' '}
+      <button type="button" onClick={() => onDecide('deny')}>
+        Deny
+      </button>
+    </div>
+  );
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dir, setDir] = useState('');
@@ -27,6 +141,7 @@ export function App() {
   const [prompt, setPrompt] = useState('');
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [pending, setPending] = useState<PendingInteraction[]>([]);
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
 
@@ -57,6 +172,24 @@ export function App() {
     await refresh();
   }
 
+  async function answerQuestion(sessionId: number, questionId: string, answer: string) {
+    await fetch(`/api/sessions/${sessionId}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId, answer }),
+    });
+    // The question_answer event coming back over SSE clears the pending form.
+  }
+
+  async function decidePermission(sessionId: number, requestId: string, decision: 'allow' | 'deny') {
+    await fetch(`/api/sessions/${sessionId}/permission`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId, decision }),
+    });
+    // The permission_decision event coming back over SSE clears the prompt.
+  }
+
   async function startSession(project: Project) {
     setError(null);
     const res = await fetch(`/api/projects/${project.id}/sessions`, {
@@ -72,6 +205,7 @@ export function App() {
     const started = await res.json();
     setSession({ id: started.id, projectName: project.name, prompt });
     setTranscript([]);
+    setPending([]);
     setStatus('streaming');
     setPrompt('');
 
@@ -85,6 +219,27 @@ export function App() {
     source.addEventListener('agent_error', (e) => {
       const { message } = JSON.parse((e as MessageEvent).data);
       setTranscript((t) => [...t, { kind: 'error', text: message }]);
+    });
+    source.addEventListener('question', (e) => {
+      const event = JSON.parse((e as MessageEvent).data);
+      setPending((p) => [...p, { kind: 'question', ...event }]);
+    });
+    source.addEventListener('question_answer', (e) => {
+      const { questionId, answer } = JSON.parse((e as MessageEvent).data);
+      setPending((p) => p.filter((i) => i.kind !== 'question' || i.questionId !== questionId));
+      setTranscript((t) => [...t, { kind: 'resolution', text: `Answered: ${answer}` }]);
+    });
+    source.addEventListener('permission_request', (e) => {
+      const event = JSON.parse((e as MessageEvent).data);
+      setPending((p) => [...p, { kind: 'permission', ...event }]);
+    });
+    source.addEventListener('permission_decision', (e) => {
+      const { requestId, decision } = JSON.parse((e as MessageEvent).data);
+      setPending((p) => p.filter((i) => i.kind !== 'permission' || i.requestId !== requestId));
+      setTranscript((t) => [
+        ...t,
+        { kind: 'resolution', text: decision === 'allow' ? 'Approved tool use.' : 'Denied tool use.' },
+      ]);
     });
     source.addEventListener('done', () => {
       setStatus('done');
@@ -146,16 +301,40 @@ export function App() {
             <em>{session.prompt}</em>
           </p>
           <div style={{ background: '#f6f6f6', padding: '1rem', borderRadius: 6 }}>
-            {transcript.length === 0 && status === 'streaming' ? (
+            {transcript.length === 0 && pending.length === 0 && status === 'streaming' ? (
               <p>Waiting for the Agent…</p>
             ) : (
               transcript.map((entry, i) => (
-                <p key={i} style={entry.kind === 'error' ? { color: 'crimson' } : undefined}>
+                <p
+                  key={i}
+                  style={
+                    entry.kind === 'error'
+                      ? { color: 'crimson' }
+                      : entry.kind === 'resolution'
+                        ? { color: '#666', fontStyle: 'italic' }
+                        : undefined
+                  }
+                >
                   {entry.text}
                 </p>
               ))
             )}
           </div>
+          {pending.map((interaction) =>
+            interaction.kind === 'question' ? (
+              <QuestionForm
+                key={interaction.questionId}
+                pending={interaction}
+                onSubmit={(answer) => void answerQuestion(session.id, interaction.questionId, answer)}
+              />
+            ) : (
+              <PermissionPrompt
+                key={interaction.requestId}
+                pending={interaction}
+                onDecide={(decision) => void decidePermission(session.id, interaction.requestId, decision)}
+              />
+            ),
+          )}
         </section>
       )}
     </main>
