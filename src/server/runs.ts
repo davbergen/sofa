@@ -5,10 +5,10 @@
  */
 import type { WorkerEvent } from './ports.js';
 
-/** Every state a run record can be in; `pr_open` and `failed` are terminal. */
-export type RunState = 'cloning' | 'working' | 'pushing' | 'pr_open' | 'failed';
+/** Every state a run record can be in; `pr_open`, `failed` and `killed` are terminal. */
+export type RunState = 'cloning' | 'working' | 'pushing' | 'pr_open' | 'failed' | 'killed';
 
-const TERMINAL_STATES: RunState[] = ['pr_open', 'failed'];
+const TERMINAL_STATES: RunState[] = ['pr_open', 'failed', 'killed'];
 
 /** A run still occupying the Project's single Worker slot. */
 export function isActive(state: RunState): boolean {

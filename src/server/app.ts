@@ -5,8 +5,8 @@ import { stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import type { Agent } from './agent.js';
 import { SessionRegistry } from './sessions.js';
-import type { ContainerAdapter, GitHubAdapter } from './ports.js';
-import { ACTIVE_STATES, applyEvent, type RunState } from './runs.js';
+import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
+import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
 
 export interface Project {
   id: number;
@@ -90,6 +90,8 @@ const RUN_COLUMNS =
 export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
   const app = new Hono();
   const sessions = new SessionRegistry();
+  // Live grips on this process's Worker containers, for the kill switch.
+  const workerHandles = new Map<number, WorkerHandle>();
 
   // A previous server process can no longer report on its Workers: any run it
   // left in flight is marked failed so it stops occupying the Worker slot.
@@ -285,7 +287,7 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .run(project.id, issue, issueTitle);
     const runId = Number(lastInsertRowid);
 
-    deps.container.startWorker({ repo, issue }, (event) => {
+    const handle = deps.container.startWorker({ repo, issue }, (event) => {
       const row = db
         .prepare('SELECT state FROM worker_runs WHERE id = ?')
         .get(runId) as unknown as { state: RunState } | undefined;
@@ -302,12 +304,47 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
         update.failureReason ?? null,
         runId,
       );
+      if (!isActive(update.state)) {
+        workerHandles.delete(runId);
+      }
     });
+    workerHandles.set(runId, handle);
 
     const row = db
       .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE id = ?`)
       .get(runId) as unknown as RunRow;
     return c.json(toRun(row), 201);
+  });
+
+  // The kill switch: stop a running Worker's container and mark its run killed.
+  app.post('/api/runs/:id/kill', async (c) => {
+    const runId = Number(c.req.param('id'));
+    const row = db
+      .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE id = ?`)
+      .get(runId) as unknown as RunRow | undefined;
+    if (!row) {
+      return c.json({ error: `no run with id ${runId}` }, 404);
+    }
+    if (!isActive(row.state as RunState)) {
+      return c.json({ error: `run ${runId} is not active (state: ${row.state})` }, 409);
+    }
+
+    const handle = workerHandles.get(runId);
+    if (handle) {
+      await handle.stop();
+      workerHandles.delete(runId);
+    }
+    // Terminal `killed` frees the Project's Worker slot; any straggler events
+    // from the dying container are ignored by applyEvent.
+    db.prepare("UPDATE worker_runs SET state = 'killed', failure_reason = ? WHERE id = ?").run(
+      'killed by user',
+      runId,
+    );
+
+    const updated = db
+      .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE id = ?`)
+      .get(runId) as unknown as RunRow;
+    return c.json(toRun(updated));
   });
 
   return app;
