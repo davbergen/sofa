@@ -6,7 +6,7 @@
   "description": "Sofa: a local web app wrapping the grill -> PRD -> issues -> autonomous implementation workflow.",
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
-    "build": "tsc -p tsconfig.server.json && vite build",
+    "build": "tsc -p tsconfig.server.json && tsc -p tsconfig.worker.json && vite build",
     "start": "node dist/server/index.js",
     "lint": "eslint . && tsc --noEmit",
     "test": "vitest run",

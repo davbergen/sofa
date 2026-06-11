@@ -15,7 +15,8 @@ describe('SdkAgent (real Claude Agent SDK)', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'sofa-sdk-smoke-'));
 
     const events: AgentEvent[] = [];
-    for await (const event of agent.run({ prompt: 'Reply with the single word: pong', cwd })) {
+    const session = agent.run({ prompt: 'Reply with the single word: pong', cwd });
+    for await (const event of session.events) {
       events.push(event);
     }
 
