@@ -11,6 +11,12 @@ const MIGRATIONS: string[] = [
     name TEXT NOT NULL,
     opened_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES open_projects(id),
+    prompt TEXT NOT NULL,
+    started_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
   `CREATE TABLE worker_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES open_projects(id),

@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import type { DatabaseSync } from 'node:sqlite';
 import { stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
+import type { Agent } from './agent.js';
+import { SessionRegistry } from './sessions.js';
 import type { ContainerAdapter, GitHubAdapter } from './ports.js';
 import { ACTIVE_STATES, applyEvent, type RunState } from './runs.js';
 
@@ -12,6 +15,13 @@ export interface Project {
   openedAt: string;
 }
 
+export interface Session {
+  id: number;
+  projectId: number;
+  prompt: string;
+  startedAt: string;
+}
+
 interface ProjectRow {
   id: number;
   dir: string;
@@ -19,8 +29,19 @@ interface ProjectRow {
   opened_at: string;
 }
 
+interface SessionRow {
+  id: number;
+  project_id: number;
+  prompt: string;
+  started_at: string;
+}
+
 function toProject(row: ProjectRow): Project {
   return { id: row.id, dir: row.dir, name: row.name, openedAt: row.opened_at };
+}
+
+function toSession(row: SessionRow): Session {
+  return { id: row.id, projectId: row.project_id, prompt: row.prompt, startedAt: row.started_at };
 }
 
 export interface Run {
@@ -66,8 +87,9 @@ export interface AppDeps {
 const RUN_COLUMNS =
   'id, project_id, issue_number, issue_title, state, pr_url, failure_reason, started_at';
 
-export function createApp(db: DatabaseSync, deps?: AppDeps): Hono {
+export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
   const app = new Hono();
+  const sessions = new SessionRegistry();
 
   // A previous server process can no longer report on its Workers: any run it
   // left in flight is marked failed so it stops occupying the Worker slot.
@@ -110,6 +132,48 @@ export function createApp(db: DatabaseSync, deps?: AppDeps): Hono {
       .prepare('SELECT id, dir, name, opened_at FROM open_projects WHERE id = ?')
       .get(lastInsertRowid) as unknown as ProjectRow;
     return c.json(toProject(row), 201);
+  });
+
+  // Start an interactive Session against an open Project.
+  app.post('/api/projects/:projectId/sessions', async (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const project = db
+      .prepare('SELECT id, dir, name, opened_at FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as ProjectRow | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) {
+      return c.json({ error: 'prompt is required' }, 400);
+    }
+
+    const { lastInsertRowid } = db
+      .prepare('INSERT INTO sessions (project_id, prompt) VALUES (?, ?)')
+      .run(projectId, prompt);
+    const row = db
+      .prepare('SELECT id, project_id, prompt, started_at FROM sessions WHERE id = ?')
+      .get(lastInsertRowid) as unknown as SessionRow;
+
+    sessions.start(row.id, agent.run({ prompt, cwd: project.dir }));
+    return c.json(toSession(row), 201);
+  });
+
+  // Live transcript: replays buffered events, then streams until the Session is done.
+  app.get('/api/sessions/:sessionId/events', (c) => {
+    const sessionId = Number(c.req.param('sessionId'));
+    const run = sessions.get(sessionId);
+    if (!run) {
+      return c.json({ error: `no running Session with id ${sessionId}` }, 404);
+    }
+    return streamSSE(c, async (stream) => {
+      for await (const event of run.stream()) {
+        await stream.writeSSE({ event: event.type, data: JSON.stringify(event) });
+      }
+      await stream.writeSSE({ event: 'done', data: '{}' });
+    });
   });
 
   function getProject(id: string): Project | null {

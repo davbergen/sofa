@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { openDb } from '../src/server/db';
 import { createApp, type AppDeps, type Run } from '../src/server/app';
+import { FakeAgent } from '../src/server/fake-agent';
 import type {
   ContainerAdapter,
   GitHubAdapter,
@@ -54,7 +55,7 @@ function makeHarness(db: DatabaseSync = openDb(':memory:')) {
   const { github, calls: githubCalls } = fakeGitHub();
   const { container, launches, emit } = fakeContainer();
   const deps: AppDeps = { github, container };
-  const app = createApp(db, deps);
+  const app = createApp(db, new FakeAgent(), deps);
   return { app, db, githubCalls, launches, emit };
 }
 
@@ -106,7 +107,7 @@ describe('ready Issues', () => {
       resolveRepo: () => Promise.reject(new Error('gh not authenticated')),
       listReadyIssues: () => Promise.reject(new Error('gh not authenticated')),
     };
-    const app = createApp(openDb(':memory:'), { github: failing, container: fakeContainer().container });
+    const app = createApp(openDb(':memory:'), new FakeAgent(), { github: failing, container: fakeContainer().container });
     const { project } = await openProject(app);
 
     const res = await app.request(`/api/projects/${project.id}/issues`);
@@ -173,7 +174,7 @@ describe('dispatching a Worker', () => {
       resolveRepo: () => Promise.reject(new Error('no origin remote')),
       listReadyIssues: () => Promise.resolve([]),
     };
-    const app = createApp(openDb(':memory:'), { github: failing, container: fakeContainer().container });
+    const app = createApp(openDb(':memory:'), new FakeAgent(), { github: failing, container: fakeContainer().container });
     const { project } = await openProject(app);
 
     const res = await dispatch(app, project.id);
