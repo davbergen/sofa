@@ -5,6 +5,7 @@ import { stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import type { Agent } from './agent.js';
 import { SessionRegistry } from './sessions.js';
+import { ActivityRegistry } from './activity.js';
 import type { ContainerAdapter, GitHubAdapter } from './ports.js';
 import { ACTIVE_STATES, applyEvent, type RunState } from './runs.js';
 
@@ -90,6 +91,7 @@ const RUN_COLUMNS =
 export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
   const app = new Hono();
   const sessions = new SessionRegistry();
+  const activity = new ActivityRegistry();
 
   // A previous server process can no longer report on its Workers: any run it
   // left in flight is marked failed so it stops occupying the Worker slot.
@@ -248,6 +250,22 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     return c.json(rows.map(toRun));
   });
 
+  // Live Worker activity: replays the buffered tail, then streams until the
+  // run reaches a terminal state. Mirrors the Session events endpoint above.
+  app.get('/api/runs/:runId/activity', (c) => {
+    const runId = Number(c.req.param('runId'));
+    const feed = activity.get(runId);
+    if (!feed) {
+      return c.json({ error: `no activity feed for run ${runId}` }, 404);
+    }
+    return streamSSE(c, async (stream) => {
+      for await (const entry of feed.stream()) {
+        await stream.writeSSE({ event: 'activity', data: JSON.stringify(entry) });
+      }
+      await stream.writeSSE({ event: 'done', data: '{}' });
+    });
+  });
+
   app.post('/api/projects/:id/runs', async (c) => {
     if (!deps) {
       return c.json({ error: 'Container adapter not configured' }, 500);
@@ -285,7 +303,25 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .run(project.id, issue, issueTitle);
     const runId = Number(lastInsertRowid);
 
+    const feed = activity.start(runId);
     deps.container.startWorker({ repo, issue }, (event) => {
+      // Mirror every event onto the run's live activity feed.
+      switch (event.type) {
+        case 'activity':
+          feed.push(event.message);
+          return; // feed-only; never touches the run record
+        case 'phase':
+          feed.push(`phase: ${event.phase}`);
+          break;
+        case 'succeeded':
+          feed.push(`opened PR ${event.prUrl}`);
+          feed.finish();
+          break;
+        case 'failed':
+          feed.push(`failed: ${event.reason}`);
+          feed.finish();
+          break;
+      }
       const row = db
         .prepare('SELECT state FROM worker_runs WHERE id = ?')
         .get(runId) as unknown as { state: RunState } | undefined;

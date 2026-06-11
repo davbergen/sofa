@@ -35,6 +35,9 @@ export function applyEvent(current: RunState, event: WorkerEvent): RunUpdate | n
   switch (event.type) {
     case 'phase':
       return { state: event.phase };
+    // Activity is feed-only; it never advances the lifecycle.
+    case 'activity':
+      return null;
     case 'succeeded':
       return { state: 'pr_open', prUrl: event.prUrl };
     case 'failed':
