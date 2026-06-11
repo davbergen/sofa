@@ -17,6 +17,18 @@ const MIGRATIONS: string[] = [
     prompt TEXT NOT NULL,
     started_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  // Session persistence: transcripts survive restarts, and Sessions carry the
+  // resume handle (the SDK session id) plus a lifecycle status.
+  `CREATE TABLE session_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX session_events_by_session ON session_events (session_id, id);
+  ALTER TABLE sessions ADD COLUMN agent_session_id TEXT;
+  ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'running'`,
 ];
 
 export function openDb(path: string): DatabaseSync {

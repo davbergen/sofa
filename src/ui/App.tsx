@@ -20,6 +20,27 @@ interface ActiveSession {
   prompt: string;
 }
 
+interface PastSession {
+  id: number;
+  projectId: number;
+  prompt: string;
+  startedAt: string;
+  status: 'running' | 'done' | 'error';
+  agentSessionId: string | null;
+}
+
+interface TranscriptEvent {
+  type: string;
+  text?: string;
+  message?: string;
+}
+
+function toEntry(event: TranscriptEvent): TranscriptEntry {
+  return event.type === 'agent_error'
+    ? { kind: 'error', text: event.message ?? '' }
+    : { kind: 'assistant', text: event.text ?? '' };
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dir, setDir] = useState('');
@@ -28,6 +49,7 @@ export function App() {
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [status, setStatus] = useState<SessionStatus | null>(null);
+  const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
 
   async function refresh() {
@@ -74,9 +96,13 @@ export function App() {
     setTranscript([]);
     setStatus('streaming');
     setPrompt('');
+    attachStream(started.id);
+  }
 
+  /** Tails the live SSE event stream of a Session, appending to the transcript. */
+  function attachStream(sessionId: number) {
     sourceRef.current?.close();
-    const source = new EventSource(`/api/sessions/${started.id}/events`);
+    const source = new EventSource(`/api/sessions/${sessionId}/events`);
     sourceRef.current = source;
     source.addEventListener('assistant_text', (e) => {
       const { text } = JSON.parse((e as MessageEvent).data);
@@ -94,6 +120,53 @@ export function App() {
       setStatus((s) => (s === 'done' ? s : 'error'));
       source.close();
     };
+  }
+
+  async function loadSessions(project: Project) {
+    setError(null);
+    const res = await fetch(`/api/projects/${project.id}/sessions`);
+    if (!res.ok) {
+      setError(`failed to list Sessions (${res.status})`);
+      return;
+    }
+    setPastSessions(await res.json());
+  }
+
+  /** Shows the persisted transcript of a past Session. */
+  async function viewTranscript(past: PastSession, projectName: string) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${past.id}/transcript`);
+    if (!res.ok) {
+      setError(`failed to load transcript (${res.status})`);
+      return;
+    }
+    const { events } = (await res.json()) as { events: TranscriptEvent[] };
+    sourceRef.current?.close();
+    setSession({ id: past.id, projectName, prompt: past.prompt });
+    setTranscript(events.map(toEntry));
+    setStatus(past.status === 'error' ? 'error' : 'done');
+  }
+
+  /** Resumes an interrupted Session (e.g. after a Sofa restart). */
+  async function resumeSession(past: PastSession, projectName: string) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${past.id}/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `failed to resume Session (${res.status})`);
+      return;
+    }
+    const transcriptRes = await fetch(`/api/sessions/${past.id}/transcript`);
+    const { events } = (await transcriptRes.json()) as { events: TranscriptEvent[] };
+    setSession({ id: past.id, projectName, prompt });
+    setTranscript(events.map(toEntry));
+    setStatus('streaming');
+    setPrompt('');
+    attachStream(past.id);
   }
 
   return (
@@ -130,11 +203,45 @@ export function App() {
                 <strong>{p.name}</strong> — <code>{p.dir}</code>{' '}
                 <button type="button" disabled={!prompt.trim()} onClick={() => void startSession(p)}>
                   Start Session
+                </button>{' '}
+                <button type="button" onClick={() => void loadSessions(p)}>
+                  Past Sessions
                 </button>
               </li>
             ))}
           </ul>
         </>
+      )}
+      {pastSessions && (
+        <section aria-label="Past Sessions">
+          <h2>Past Sessions</h2>
+          {pastSessions.length === 0 ? (
+            <p>No Sessions yet for this Project.</p>
+          ) : (
+            <ul>
+              {pastSessions.map((s) => {
+                const projectName = projects.find((p) => p.id === s.projectId)?.name ?? `Project ${s.projectId}`;
+                return (
+                  <li key={s.id} style={{ marginBottom: '0.25rem' }}>
+                    Session #{s.id} — <em>{s.prompt}</em> <small>({s.status})</small>{' '}
+                    <button type="button" onClick={() => void viewTranscript(s, projectName)}>
+                      View transcript
+                    </button>{' '}
+                    {s.status === 'running' && s.agentSessionId && (
+                      <button
+                        type="button"
+                        disabled={!prompt.trim()}
+                        onClick={() => void resumeSession(s, projectName)}
+                      >
+                        Resume
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
       )}
       {session && (
         <section aria-label="Session transcript">

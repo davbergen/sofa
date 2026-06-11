@@ -13,13 +13,15 @@ export interface SdkAgentOptions {
 export class SdkAgent implements Agent {
   constructor(private readonly options: SdkAgentOptions = {}) {}
 
-  async *run({ prompt, cwd }: AgentRunInput): AsyncIterable<AgentEvent> {
+  async *run({ prompt, cwd, resume }: AgentRunInput): AsyncIterable<AgentEvent> {
     const messages = query({
       prompt,
-      options: { cwd, maxTurns: this.options.maxTurns },
+      options: { cwd, maxTurns: this.options.maxTurns, resume },
     });
     for await (const message of messages) {
-      if (message.type === 'assistant') {
+      if (message.type === 'system' && message.subtype === 'init') {
+        yield { type: 'agent_session', agentSessionId: message.session_id };
+      } else if (message.type === 'assistant') {
         for (const block of message.message.content) {
           if (block.type === 'text' && block.text) {
             yield { type: 'assistant_text', text: block.text };
