@@ -108,6 +108,45 @@ export function createApp(db: DatabaseSync, agent: Agent): Hono {
     return c.json(toSession(row), 201);
   });
 
+  // Answer a pending Agent question; the answer flows back into the running Session
+  // and is echoed onto the transcript so all subscribers see the question resolved.
+  app.post('/api/sessions/:sessionId/answer', async (c) => {
+    const sessionId = Number(c.req.param('sessionId'));
+    const run = sessions.get(sessionId);
+    const agentSession = sessions.agent(sessionId);
+    if (!run || !agentSession) {
+      return c.json({ error: `no running Session with id ${sessionId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const questionId = typeof body?.questionId === 'string' ? body.questionId : '';
+    const answer = typeof body?.answer === 'string' ? body.answer.trim() : '';
+    if (!questionId || !answer) {
+      return c.json({ error: 'questionId and answer are required' }, 400);
+    }
+    agentSession.answerQuestion(questionId, answer);
+    run.push({ type: 'question_answer', questionId, answer });
+    return c.json({ ok: true });
+  });
+
+  // Decide a pending permission request; the gated tool runs only on 'allow'.
+  app.post('/api/sessions/:sessionId/permission', async (c) => {
+    const sessionId = Number(c.req.param('sessionId'));
+    const run = sessions.get(sessionId);
+    const agentSession = sessions.agent(sessionId);
+    if (!run || !agentSession) {
+      return c.json({ error: `no running Session with id ${sessionId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const requestId = typeof body?.requestId === 'string' ? body.requestId : '';
+    const decision = body?.decision;
+    if (!requestId || (decision !== 'allow' && decision !== 'deny')) {
+      return c.json({ error: "requestId and a decision of 'allow' or 'deny' are required" }, 400);
+    }
+    agentSession.decidePermission(requestId, decision);
+    run.push({ type: 'permission_decision', requestId, decision });
+    return c.json({ ok: true });
+  });
+
   // Live transcript: replays buffered events, then streams until the Session is done.
   app.get('/api/sessions/:sessionId/events', (c) => {
     const sessionId = Number(c.req.param('sessionId'));
