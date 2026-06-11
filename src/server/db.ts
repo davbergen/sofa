@@ -17,6 +17,16 @@ const MIGRATIONS: string[] = [
     prompt TEXT NOT NULL,
     started_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  `CREATE TABLE worker_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES open_projects(id),
+    issue_number INTEGER NOT NULL,
+    issue_title TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL,
+    pr_url TEXT,
+    failure_reason TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
 ];
 
 export function openDb(path: string): DatabaseSync {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ProjectDashboard } from './ProjectDashboard';
 
 interface Project {
   id: number;
@@ -144,6 +145,7 @@ export function App() {
   const [pending, setPending] = useState<PendingInteraction[]>([]);
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
 
   async function refresh() {
     const res = await fetch('/api/projects');
@@ -285,7 +287,11 @@ export function App() {
                 <strong>{p.name}</strong> — <code>{p.dir}</code>{' '}
                 <button type="button" disabled={!prompt.trim()} onClick={() => void startSession(p)}>
                   Start Session
+                </button>{' '}
+                <button type="button" onClick={() => setOpenId(openId === p.id ? null : p.id)}>
+                  {openId === p.id ? 'Hide dashboard' : 'Show dashboard'}
                 </button>
+                {openId === p.id && <ProjectDashboard projectId={p.id} />}
               </li>
             ))}
           </ul>
