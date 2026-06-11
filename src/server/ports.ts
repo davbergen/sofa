@@ -35,6 +35,11 @@ export interface StartWorkerOptions {
   issue: number;
   /** Optional PR base branch. */
   baseBranch?: string;
+  /**
+   * Worker container image override from the Project's sofa.json; when
+   * omitted the adapter launches its generic default image.
+   */
+  image?: string;
 }
 
 /** Wraps the Docker boundary: launches throwaway Worker containers. */
