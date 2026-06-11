@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { ProjectDashboard } from './ProjectDashboard';
 
 interface Project {
   id: number;
@@ -11,6 +12,7 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dir, setDir] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
 
   async function refresh() {
     const res = await fetch('/api/projects');
@@ -61,7 +63,11 @@ export function App() {
         <ul>
           {projects.map((p) => (
             <li key={p.id}>
-              <strong>{p.name}</strong> — <code>{p.dir}</code>
+              <strong>{p.name}</strong> — <code>{p.dir}</code>{' '}
+              <button onClick={() => setOpenId(openId === p.id ? null : p.id)}>
+                {openId === p.id ? 'Hide dashboard' : 'Show dashboard'}
+              </button>
+              {openId === p.id && <ProjectDashboard projectId={p.id} />}
             </li>
           ))}
         </ul>
