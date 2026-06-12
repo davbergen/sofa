@@ -8,6 +8,7 @@ import { SessionRegistry } from './sessions.js';
 import { SessionStore } from './session-store.js';
 import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
 import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
+import { readSofaConfig, SofaConfigError } from './sofa-config.js';
 
 export interface Project {
   id: number;
@@ -312,6 +313,18 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       return c.json({ error: 'a Worker is already running for this Project' }, 409);
     }
 
+    // An invalid sofa.json rejects the dispatch outright (no run record) —
+    // silently falling back to the generic image would mask the problem.
+    let workerImage: string | undefined;
+    try {
+      workerImage = (await readSofaConfig(project.dir)).workerImage;
+    } catch (err) {
+      if (err instanceof SofaConfigError) {
+        return c.json({ error: err.message }, 422);
+      }
+      throw err;
+    }
+
     let repo: string;
     try {
       repo = await deps.github.resolveRepo(project.dir);
@@ -324,7 +337,9 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .run(project.id, issue, issueTitle);
     const runId = Number(lastInsertRowid);
 
-    const handle = deps.container.startWorker({ repo, issue }, (event) => {
+    const handle = deps.container.startWorker(
+      { repo, issue, ...(workerImage ? { image: workerImage } : {}) },
+      (event) => {
       const row = db
         .prepare('SELECT state FROM worker_runs WHERE id = ?')
         .get(runId) as unknown as { state: RunState } | undefined;

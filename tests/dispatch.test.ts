@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -182,6 +182,59 @@ describe('dispatching a Worker', () => {
 
     expect(res.status).toBe(502);
     expect(await runs(app, project.id)).toHaveLength(0);
+  });
+});
+
+describe('Worker image override (sofa.json)', () => {
+  it('launches with the image from sofa.json when one is configured', async () => {
+    const h = makeHarness();
+    const { dir, project } = await openProject(h.app);
+    writeFileSync(join(dir, 'sofa.json'), JSON.stringify({ workerImage: 'sofa-worker-rust' }));
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches).toEqual([{ repo: 'davbergen/scratch', issue: 7, image: 'sofa-worker-rust' }]);
+  });
+
+  it('launches with no image override when there is no sofa.json', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches).toEqual([{ repo: 'davbergen/scratch', issue: 7 }]);
+    expect(h.launches[0].image).toBeUndefined();
+  });
+
+  it('launches with no image override when sofa.json omits workerImage', async () => {
+    const h = makeHarness();
+    const { dir, project } = await openProject(h.app);
+    writeFileSync(join(dir, 'sofa.json'), JSON.stringify({}));
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches[0].image).toBeUndefined();
+  });
+
+  it.each([
+    ['malformed JSON', '{ "workerImage": '],
+    ['a non-string workerImage', JSON.stringify({ workerImage: 42 })],
+    ['an empty workerImage', JSON.stringify({ workerImage: '   ' })],
+    ['a non-object document', JSON.stringify(['sofa-worker'])],
+  ])('rejects dispatch with 422 and records no run for %s', async (_what, contents) => {
+    const h = makeHarness();
+    const { dir, project } = await openProject(h.app);
+    writeFileSync(join(dir, 'sofa.json'), contents);
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain('sofa.json');
+    expect(h.launches).toHaveLength(0);
+    expect(await runs(h.app, project.id)).toHaveLength(0);
   });
 });
 

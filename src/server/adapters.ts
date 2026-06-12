@@ -96,7 +96,7 @@ export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 
       if (opts.baseBranch) {
         args.push('-e', `WORKER_BASE_BRANCH=${opts.baseBranch}`);
       }
-      args.push(image);
+      args.push(opts.image ?? image);
 
       const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false });
       let stdout = '';
