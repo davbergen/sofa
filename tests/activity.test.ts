@@ -26,6 +26,7 @@ function fakeContainer() {
     startWorker(opts, handler) {
       launches.push(opts);
       onEvent = handler;
+      return { stop: () => Promise.resolve() };
     },
   };
   return { container, launches, emit: (event: WorkerEvent) => onEvent?.(event) };

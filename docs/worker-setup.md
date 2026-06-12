@@ -71,6 +71,30 @@ JSON object:
 
 The GitHub token is redacted from all logs and failure reasons.
 
+## Per-Project image override (`sofa.json`)
+
+The generic `sofa-worker` image (Node toolchain) is the default for every
+Project — typical Projects need zero configuration. A Project whose toolchain
+the generic image cannot serve may place a `sofa.json` at its repo root:
+
+```json
+{
+  "workerImage": "sofa-worker-rust"
+}
+```
+
+When present, Sofa launches Workers for that Project with the named image
+instead of the generic one. The image must follow the same contract as
+`worker/Dockerfile` (env-var inputs, `[worker] ...` stderr phases, final JSON
+outcome line) — typically it is built `FROM` the generic image with extra
+toolchains layered on.
+
+An invalid `sofa.json` — malformed JSON, a non-object document, or a
+`workerImage` that is not a non-empty string — rejects dispatch with a clear
+error rather than silently falling back to the generic image. A `workerImage`
+naming an image that does not exist locally fails at `docker run` and surfaces
+through the normal run-failure path.
+
 ## Tests
 
 Harness logic is unit-tested with fakes in `tests/worker-harness.test.ts`

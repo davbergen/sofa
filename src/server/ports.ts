@@ -36,6 +36,17 @@ export interface StartWorkerOptions {
   issue: number;
   /** Optional PR base branch. */
   baseBranch?: string;
+  /**
+   * Worker container image override from the Project's sofa.json; when
+   * omitted the adapter launches its generic default image.
+   */
+  image?: string;
+}
+
+/** A grip on one launched Worker container, used for the kill switch. */
+export interface WorkerHandle {
+  /** Stops the Worker's container immediately. Idempotent; never throws. */
+  stop(): Promise<void>;
 }
 
 /** Wraps the Docker boundary: launches throwaway Worker containers. */
@@ -43,7 +54,7 @@ export interface ContainerAdapter {
   /**
    * Starts a Worker container and reports lifecycle events until a terminal
    * `succeeded` or `failed` event. Never throws; launch errors surface as a
-   * `failed` event.
+   * `failed` event. The returned handle can stop the container mid-run.
    */
-  startWorker(opts: StartWorkerOptions, onEvent: (event: WorkerEvent) => void): void;
+  startWorker(opts: StartWorkerOptions, onEvent: (event: WorkerEvent) => void): WorkerHandle;
 }

@@ -9,6 +9,7 @@
  *   outcome from its final machine-readable JSON stdout line.
  */
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { ContainerAdapter, GitHubAdapter, ReadyIssue, WorkerEvent } from './ports.js';
 
 interface ExecResult {
@@ -81,10 +82,12 @@ export function parseOutcomeLine(stdout: string, exitCode: number): WorkerEvent 
 export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 'sofa-worker'): ContainerAdapter {
   return {
     startWorker(opts, onEvent) {
+      // Named so the kill switch can `docker rm -f` this exact container.
+      const name = `sofa-worker-${randomUUID().slice(0, 8)}`;
       // Secrets are passed through from the server's environment by name
       // (`-e NAME` with no value) so tokens never appear in the argv.
       const args = [
-        'run', '--rm',
+        'run', '--rm', '--name', name,
         '-e', `WORKER_REPO=${opts.repo}`,
         '-e', `WORKER_ISSUE=${opts.issue}`,
         '-e', 'GITHUB_TOKEN',
@@ -93,7 +96,7 @@ export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 
       if (opts.baseBranch) {
         args.push('-e', `WORKER_BASE_BRANCH=${opts.baseBranch}`);
       }
-      args.push(image);
+      args.push(opts.image ?? image);
 
       const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false });
       let stdout = '';
@@ -124,6 +127,14 @@ export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 
       child.on('close', (code) => {
         onEvent(parseOutcomeLine(stdout, code ?? 1));
       });
+
+      return {
+        async stop() {
+          // Force-remove kills the container; exec never throws and a missing
+          // container (already finished) is fine — stop is idempotent.
+          await exec('docker', ['rm', '-f', name]);
+        },
+      };
     },
   };
 }
