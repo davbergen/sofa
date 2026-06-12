@@ -22,11 +22,23 @@ export interface GitHubAdapter {
 /** Lifecycle phases a running Worker reports before it finishes. */
 export type WorkerPhase = 'cloning' | 'working' | 'pushing';
 
-/** Events a Worker container emits while it runs. */
+/** Token usage reported by the Agent SDK for one run or Session turn. */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+/**
+ * Events a Worker container emits while it runs. Terminal events may carry
+ * the token usage the Worker's agent reported (absent when the Worker died
+ * before the agent ran, or on older Worker images).
+ */
 export type WorkerEvent =
   | { type: 'phase'; phase: WorkerPhase }
-  | { type: 'succeeded'; prUrl: string }
-  | { type: 'failed'; reason: string };
+  | { type: 'succeeded'; prUrl: string; usage?: TokenUsage }
+  | { type: 'failed'; reason: string; usage?: TokenUsage };
 
 export interface StartWorkerOptions {
   /** GitHub repository as `owner/name`. */

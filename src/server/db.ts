@@ -27,6 +27,19 @@ const MIGRATIONS: string[] = [
     failure_reason TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  // Quota meter: one row per usage report from the Agent SDK, attributed to
+  // either a Worker run or an interactive Session.
+  `CREATE TABLE token_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES open_projects(id),
+    run_id INTEGER REFERENCES worker_runs(id),
+    session_id INTEGER REFERENCES sessions(id),
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
 ];
 
 export function openDb(path: string): DatabaseSync {

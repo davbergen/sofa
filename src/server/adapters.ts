@@ -10,6 +10,7 @@
  */
 import { spawn } from 'node:child_process';
 import type { ContainerAdapter, GitHubAdapter, ReadyIssue, WorkerEvent } from './ports.js';
+import { coerceUsage } from './usage.js';
 
 interface ExecResult {
   code: number;
@@ -68,11 +69,21 @@ const PHASE_PATTERNS: Array<[RegExp, 'cloning' | 'working' | 'pushing']> = [
 export function parseOutcomeLine(stdout: string, exitCode: number): WorkerEvent {
   const lastLine = stdout.trim().split('\n').pop() ?? '';
   try {
-    const outcome = JSON.parse(lastLine) as { outcome: string; prUrl?: string; reason?: string };
+    const outcome = JSON.parse(lastLine) as {
+      outcome: string;
+      prUrl?: string;
+      reason?: string;
+      usage?: unknown;
+    };
+    const usage = coerceUsage(outcome.usage);
     if (outcome.outcome === 'succeeded' && outcome.prUrl) {
-      return { type: 'succeeded', prUrl: outcome.prUrl };
+      return { type: 'succeeded', prUrl: outcome.prUrl, ...(usage ? { usage } : {}) };
     }
-    return { type: 'failed', reason: outcome.reason ?? 'worker reported failure without a reason' };
+    return {
+      type: 'failed',
+      reason: outcome.reason ?? 'worker reported failure without a reason',
+      ...(usage ? { usage } : {}),
+    };
   } catch {
     return { type: 'failed', reason: `worker exited ${exitCode} without a parseable outcome line` };
   }

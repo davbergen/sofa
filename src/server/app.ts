@@ -7,6 +7,7 @@ import type { Agent } from './agent.js';
 import { SessionRegistry } from './sessions.js';
 import type { ContainerAdapter, GitHubAdapter } from './ports.js';
 import { ACTIVE_STATES, applyEvent, type RunState } from './runs.js';
+import { projectUsage, recordRunUsage, recordSessionUsage, withUsageRecording } from './usage.js';
 
 export interface Project {
   id: number;
@@ -157,7 +158,12 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .prepare('SELECT id, project_id, prompt, started_at FROM sessions WHERE id = ?')
       .get(lastInsertRowid) as unknown as SessionRow;
 
-    sessions.start(row.id, agent.run({ prompt, cwd: project.dir }));
+    // The quota meter taps the event stream: usage reports are persisted as
+    // they stream by; Agents that emit none simply record nothing.
+    const agentSession = withUsageRecording(agent.run({ prompt, cwd: project.dir }), (usage) =>
+      recordSessionUsage(db, projectId, row.id, usage),
+    );
+    sessions.start(row.id, agentSession);
     return c.json(toSession(row), 201);
   });
 
@@ -237,6 +243,15 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     }
   });
 
+  // The quota meter: per-run usage plus aggregates over time for one Project.
+  app.get('/api/projects/:id/usage', (c) => {
+    const project = getProject(c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'no such Project' }, 404);
+    }
+    return c.json(projectUsage(db, project.id));
+  });
+
   app.get('/api/projects/:id/runs', (c) => {
     const project = getProject(c.req.param('id'));
     if (!project) {
@@ -302,6 +317,11 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
         update.failureReason ?? null,
         runId,
       );
+      // Quota meter: terminal events may carry the run's token usage. Stale
+      // events were already filtered above, so a run records at most once.
+      if ((event.type === 'succeeded' || event.type === 'failed') && event.usage) {
+        recordRunUsage(db, project.id, runId, event.usage);
+      }
     });
 
     const row = db

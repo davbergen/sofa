@@ -18,6 +18,22 @@ interface Run {
   startedAt: string;
 }
 
+interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
+}
+
+interface ProjectUsage {
+  total: UsageTotals;
+  byDay: Array<{ day: string } & UsageTotals>;
+  byRun: Array<{ runId: number } & UsageTotals>;
+}
+
+const formatTokens = (n: number) => n.toLocaleString('en-US');
+
 const STATE_LABELS: Record<RunState, string> = {
   cloning: 'cloning',
   working: 'working',
@@ -40,11 +56,17 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [issuesError, setIssuesError] = useState<string | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<ProjectUsage | null>(null);
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
     if (res.ok) {
       setRuns(await res.json());
+    }
+    // The quota meter rides along with run refreshes so usage stays current.
+    const usageRes = await fetch(`/api/projects/${projectId}/usage`);
+    if (usageRes.ok) {
+      setUsage(await usageRes.json());
     }
   }, [projectId]);
 
@@ -73,6 +95,8 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
     const timer = setInterval(() => void refreshRuns(), 2000);
     return () => clearInterval(timer);
   }, [refreshRuns, anyActive]);
+
+  const usageByRun = new Map((usage?.byRun ?? []).map((u) => [u.runId, u]));
 
   async function dispatchIssue(issue: ReadyIssue) {
     setDispatchError(null);
@@ -135,9 +159,36 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
               {run.state === 'failed' && run.failureReason && (
                 <span style={{ color: 'crimson' }}> — {run.failureReason}</span>
               )}
+              {usageByRun.has(run.id) && (
+                <small style={{ color: '#666' }}>
+                  {' — '}
+                  {formatTokens(usageByRun.get(run.id)!.totalTokens)} tokens
+                </small>
+              )}
             </li>
           ))}
         </ul>
+      )}
+
+      <h3 style={{ margin: '0.5rem 0' }}>Token Usage</h3>
+      {!usage || usage.total.totalTokens === 0 ? (
+        <p>No usage recorded yet.</p>
+      ) : (
+        <>
+          <p style={{ margin: '0.25rem 0' }}>
+            Total: <strong>{formatTokens(usage.total.totalTokens)}</strong> tokens (
+            {formatTokens(usage.total.inputTokens)} in, {formatTokens(usage.total.outputTokens)} out,{' '}
+            {formatTokens(usage.total.cacheReadTokens + usage.total.cacheCreationTokens)} cache)
+          </p>
+          <ul style={{ paddingLeft: '1.25rem' }}>
+            {usage.byDay.map((day) => (
+              <li key={day.day} style={{ margin: '0.25rem 0' }}>
+                {day.day}: {formatTokens(day.totalTokens)} tokens (
+                {formatTokens(day.inputTokens)} in, {formatTokens(day.outputTokens)} out)
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );
