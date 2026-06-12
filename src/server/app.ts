@@ -2,9 +2,11 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { DatabaseSync } from 'node:sqlite';
 import { stat } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import type { Agent } from './agent.js';
 import { SessionRegistry } from './sessions.js';
+import { fsSkillSource, type SkillSource } from './skills.js';
 import type { ContainerAdapter, GitHubAdapter } from './ports.js';
 import { ACTIVE_STATES, applyEvent, type RunState } from './runs.js';
 
@@ -19,6 +21,8 @@ export interface Session {
   id: number;
   projectId: number;
   prompt: string;
+  /** Name of the skill loaded into the Session, if any. */
+  skill: string | null;
   startedAt: string;
 }
 
@@ -33,6 +37,7 @@ interface SessionRow {
   id: number;
   project_id: number;
   prompt: string;
+  skill: string | null;
   started_at: string;
 }
 
@@ -41,7 +46,13 @@ function toProject(row: ProjectRow): Project {
 }
 
 function toSession(row: SessionRow): Session {
-  return { id: row.id, projectId: row.project_id, prompt: row.prompt, startedAt: row.started_at };
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    prompt: row.prompt,
+    skill: row.skill,
+    startedAt: row.started_at,
+  };
 }
 
 export interface Run {
@@ -87,9 +98,17 @@ export interface AppDeps {
 const RUN_COLUMNS =
   'id, project_id, issue_number, issue_title, state, pr_url, failure_reason, started_at';
 
-export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
+export function createApp(
+  db: DatabaseSync,
+  agent: Agent,
+  deps?: AppDeps,
+  skills?: SkillSource,
+): Hono {
   const app = new Hono();
   const sessions = new SessionRegistry();
+  // Skills come from the user's real ~/.claude by default (one source of
+  // truth shared with the CLI); tests inject a temp-dir source instead.
+  const skillSource = skills ?? fsSkillSource(join(homedir(), '.claude'));
 
   // A previous server process can no longer report on its Workers: any run it
   // left in flight is marked failed so it stops occupying the Worker slot.
@@ -134,6 +153,18 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     return c.json(toProject(row), 201);
   });
 
+  // Skills discoverable from the user's ~/.claude setup, loadable into a Session.
+  app.get('/api/skills', async (c) => {
+    try {
+      return c.json(await skillSource.list());
+    } catch (err) {
+      return c.json(
+        { error: `listing skills failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
   // Start an interactive Session against an open Project.
   app.post('/api/projects/:projectId/sessions', async (c) => {
     const projectId = Number(c.req.param('projectId'));
@@ -149,15 +180,17 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     if (!prompt) {
       return c.json({ error: 'prompt is required' }, 400);
     }
+    // Optionally load a skill from the user's ~/.claude setup into the Session.
+    const skill = typeof body?.skill === 'string' && body.skill.trim() ? body.skill.trim() : null;
 
     const { lastInsertRowid } = db
-      .prepare('INSERT INTO sessions (project_id, prompt) VALUES (?, ?)')
-      .run(projectId, prompt);
+      .prepare('INSERT INTO sessions (project_id, prompt, skill) VALUES (?, ?, ?)')
+      .run(projectId, prompt, skill);
     const row = db
-      .prepare('SELECT id, project_id, prompt, started_at FROM sessions WHERE id = ?')
+      .prepare('SELECT id, project_id, prompt, skill, started_at FROM sessions WHERE id = ?')
       .get(lastInsertRowid) as unknown as SessionRow;
 
-    sessions.start(row.id, agent.run({ prompt, cwd: project.dir }));
+    sessions.start(row.id, agent.run({ prompt, cwd: project.dir, ...(skill ? { skill } : {}) }));
     return c.json(toSession(row), 201);
   });
 

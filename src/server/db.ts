@@ -27,6 +27,8 @@ const MIGRATIONS: string[] = [
     failure_reason TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  // The skill (from ~/.claude) loaded into the Session, if any.
+  `ALTER TABLE sessions ADD COLUMN skill TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {

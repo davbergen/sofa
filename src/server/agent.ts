@@ -52,19 +52,34 @@ export interface PermissionDecisionEvent {
   decision: PermissionDecision;
 }
 
+/**
+ * The Agent wrote or updated one of the Project's living documents
+ * (CONTEXT.md or a file under docs/adr/), derived from tool-use messages.
+ */
+export interface FileWriteEvent {
+  type: 'file_write';
+  /** The written file's path as reported by the tool call. */
+  path: string;
+  /** The tool that performed the write (Write, Edit, …). */
+  toolName: string;
+}
+
 export type AgentEvent =
   | AssistantTextEvent
   | AgentErrorEvent
   | QuestionEvent
   | QuestionAnswerEvent
   | PermissionRequestEvent
-  | PermissionDecisionEvent;
+  | PermissionDecisionEvent
+  | FileWriteEvent;
 
 export interface AgentRunInput {
   /** The user prompt that starts the Session. */
   prompt: string;
   /** The open Project's directory; interactive Sessions run on the host against the real working copy. */
   cwd: string;
+  /** Name of a skill from the user's ~/.claude setup to load into the Session. */
+  skill?: string;
 }
 
 /** A handle on one running Session turn: its event stream plus the back-channel for answers. */
