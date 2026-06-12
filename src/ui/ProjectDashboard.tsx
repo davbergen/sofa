@@ -6,7 +6,7 @@ interface ReadyIssue {
   url: string;
 }
 
-type RunState = 'cloning' | 'working' | 'pushing' | 'pr_open' | 'failed';
+type RunState = 'cloning' | 'working' | 'pushing' | 'pr_open' | 'failed' | 'killed';
 
 interface Run {
   id: number;
@@ -24,6 +24,7 @@ const STATE_LABELS: Record<RunState, string> = {
   pushing: 'pushing',
   pr_open: 'PR open',
   failed: 'failed',
+  killed: 'killed',
 };
 
 const ACTIVE: RunState[] = ['cloning', 'working', 'pushing'];
@@ -31,6 +32,7 @@ const ACTIVE: RunState[] = ['cloning', 'working', 'pushing'];
 function stateColor(state: RunState): string {
   if (state === 'pr_open') return 'seagreen';
   if (state === 'failed') return 'crimson';
+  if (state === 'killed') return 'dimgray';
   return 'darkorange';
 }
 
@@ -40,6 +42,7 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [issuesError, setIssuesError] = useState<string | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [killError, setKillError] = useState<string | null>(null);
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -88,6 +91,16 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
     await refreshRuns();
   }
 
+  async function killRun(runId: number) {
+    setKillError(null);
+    const res = await fetch(`/api/runs/${runId}/kill`, { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setKillError(body?.error ?? `kill failed (${res.status})`);
+    }
+    await refreshRuns();
+  }
+
   return (
     <section style={{ margin: '0.5rem 0 1rem', paddingLeft: '1rem', borderLeft: '3px solid #ddd' }}>
       <h3 style={{ margin: '0.5rem 0' }}>Ready Issues</h3>
@@ -112,6 +125,7 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
       {dispatchError && <p role="alert" style={{ color: 'crimson' }}>{dispatchError}</p>}
 
       <h3 style={{ margin: '0.5rem 0' }}>Worker Runs</h3>
+      {killError && <p role="alert" style={{ color: 'crimson' }}>{killError}</p>}
       {runs.length === 0 ? (
         <p>No Workers dispatched yet.</p>
       ) : (
@@ -124,6 +138,12 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
                 {STATE_LABELS[run.state]}
               </span>{' '}
               <small>started {run.startedAt}</small>
+              {ACTIVE.includes(run.state) && (
+                <>
+                  {' '}
+                  <button onClick={() => void killRun(run.id)}>Kill</button>
+                </>
+              )}
               {run.state === 'pr_open' && run.prUrl && (
                 <>
                   {' — '}
@@ -134,6 +154,9 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
               )}
               {run.state === 'failed' && run.failureReason && (
                 <span style={{ color: 'crimson' }}> — {run.failureReason}</span>
+              )}
+              {run.state === 'killed' && run.failureReason && (
+                <span style={{ color: 'dimgray' }}> — {run.failureReason}</span>
               )}
             </li>
           ))}
