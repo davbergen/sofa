@@ -36,7 +36,7 @@ interface AskUserQuestionInput {
 export class SdkAgent implements Agent {
   constructor(private readonly options: SdkAgentOptions = {}) {}
 
-  run({ prompt, cwd }: AgentRunInput): AgentSession {
+  run({ prompt, cwd, resume }: AgentRunInput): AgentSession {
     // SessionRun doubles as a push-based event buffer here, merging events
     // from the SDK message loop and the canUseTool callback into one stream.
     const out = new SessionRun();
@@ -74,10 +74,12 @@ export class SdkAgent implements Agent {
       try {
         const messages = query({
           prompt,
-          options: { cwd, maxTurns: this.options.maxTurns, canUseTool },
+          options: { cwd, maxTurns: this.options.maxTurns, canUseTool, resume },
         });
         for await (const message of messages) {
-          if (message.type === 'assistant') {
+          if (message.type === 'system' && message.subtype === 'init') {
+            out.push({ type: 'agent_session', agentSessionId: message.session_id });
+          } else if (message.type === 'assistant') {
             for (const block of message.message.content) {
               if (block.type === 'text' && block.text) {
                 out.push({ type: 'assistant_text', text: block.text });
