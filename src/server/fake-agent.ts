@@ -6,6 +6,15 @@ import type {
   PermissionDecision,
 } from './agent.js';
 
+export interface FakeAgentOptions {
+  /** Agent session handle the fake announces as its first event, enabling resume. */
+  agentSessionId?: string;
+  /** Scripted continuation: events emitted when run with `resume` set. */
+  resumeScript?: AgentEvent[];
+  /** If true, the initial run never completes — simulates an interrupted Session. */
+  hang?: boolean;
+}
+
 /**
  * A scripted step for the FakeAgent: either an event to emit, or the
  * `await_message` marker, which pauses the stream until the next follow-up
@@ -38,12 +47,13 @@ export class FakeAgent implements Agent {
 
   constructor(
     private readonly script: FakeAgentStep[] = [{ type: 'assistant_text', text: 'Hello from the fake Agent.' }],
+    private readonly options: FakeAgentOptions = {},
   ) {}
 
   run(input: AgentRunInput): AgentSession {
     this.runs.push(input);
     return {
-      events: this.emit(),
+      events: this.emitFor(input),
       answerQuestion: (questionId, answer) => {
         this.answers.push({ questionId, answer });
         this.resolve(`question:${questionId}`, answer);
@@ -64,8 +74,22 @@ export class FakeAgent implements Agent {
     };
   }
 
-  private async *emit(): AsyncGenerator<AgentEvent> {
-    for (const step of this.script) {
+  private async *emitFor(input: AgentRunInput): AsyncGenerator<AgentEvent> {
+    if (input.resume) {
+      yield* this.emit(this.options.resumeScript ?? []);
+      return;
+    }
+    if (this.options.agentSessionId) {
+      yield { type: 'agent_session', agentSessionId: this.options.agentSessionId };
+    }
+    yield* this.emit(this.script);
+    if (this.options.hang) {
+      await new Promise(() => {}); // interrupted: never finishes
+    }
+  }
+
+  private async *emit(script: FakeAgentStep[]): AsyncGenerator<AgentEvent> {
+    for (const step of script) {
       // Yield asynchronously so events stream like a real Agent's would.
       await new Promise((resolve) => setImmediate(resolve));
       if (step.type === 'await_message') {

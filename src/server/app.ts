@@ -3,8 +3,9 @@ import { streamSSE } from 'hono/streaming';
 import type { DatabaseSync } from 'node:sqlite';
 import { stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import type { Agent } from './agent.js';
+import type { Agent, AgentRunInput } from './agent.js';
 import { SessionRegistry } from './sessions.js';
+import { SessionStore } from './session-store.js';
 import type { ContainerAdapter, GitHubAdapter } from './ports.js';
 import { ACTIVE_STATES, applyEvent, type RunState } from './runs.js';
 
@@ -15,12 +16,7 @@ export interface Project {
   openedAt: string;
 }
 
-export interface Session {
-  id: number;
-  projectId: number;
-  prompt: string;
-  startedAt: string;
-}
+export type { PersistedSession as Session } from './session-store.js';
 
 interface ProjectRow {
   id: number;
@@ -29,19 +25,8 @@ interface ProjectRow {
   opened_at: string;
 }
 
-interface SessionRow {
-  id: number;
-  project_id: number;
-  prompt: string;
-  started_at: string;
-}
-
 function toProject(row: ProjectRow): Project {
   return { id: row.id, dir: row.dir, name: row.name, openedAt: row.opened_at };
-}
-
-function toSession(row: SessionRow): Session {
-  return { id: row.id, projectId: row.project_id, prompt: row.prompt, startedAt: row.started_at };
 }
 
 export interface Run {
@@ -96,6 +81,15 @@ export const READY_LABEL = 'ready-for-agent';
 export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
   const app = new Hono();
   const sessions = new SessionRegistry();
+  const store = new SessionStore(db);
+
+  /** Runs one Agent turn for a Session, persisting events as they stream. */
+  function runSession(sessionId: number, input: AgentRunInput): void {
+    sessions.start(sessionId, agent.run(input), {
+      onEvent: (event) => store.appendEvent(sessionId, event),
+      onFinish: (errored) => store.setStatus(sessionId, errored ? 'error' : 'done'),
+    });
+  }
 
   // A previous server process can no longer report on its Workers: any run it
   // left in flight is marked failed so it stops occupying the Worker slot.
@@ -156,15 +150,58 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       return c.json({ error: 'prompt is required' }, 400);
     }
 
-    const { lastInsertRowid } = db
-      .prepare('INSERT INTO sessions (project_id, prompt) VALUES (?, ?)')
-      .run(projectId, prompt);
-    const row = db
-      .prepare('SELECT id, project_id, prompt, started_at FROM sessions WHERE id = ?')
-      .get(lastInsertRowid) as unknown as SessionRow;
+    const session = store.create(projectId, prompt);
+    runSession(session.id, { prompt, cwd: project.dir });
+    return c.json(session, 201);
+  });
 
-    sessions.start(row.id, agent.run({ prompt, cwd: project.dir }));
-    return c.json(toSession(row), 201);
+  // Past (and running) Sessions for a Project, from the SQLite store.
+  app.get('/api/projects/:projectId/sessions', (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const project = db
+      .prepare('SELECT id FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+    return c.json(store.listByProject(projectId));
+  });
+
+  // The persisted transcript: survives restarts, unlike the live event stream.
+  app.get('/api/sessions/:sessionId/transcript', (c) => {
+    const sessionId = Number(c.req.param('sessionId'));
+    const session = store.get(sessionId);
+    if (!session) {
+      return c.json({ error: `no Session with id ${sessionId}` }, 404);
+    }
+    return c.json({ session, events: store.transcript(sessionId) });
+  });
+
+  // Resume an interrupted Session (e.g. after a Sofa restart): continues the
+  // Agent conversation via its persisted resume handle and streams new events
+  // on the usual /events endpoint.
+  app.post('/api/sessions/:sessionId/resume', async (c) => {
+    const sessionId = Number(c.req.param('sessionId'));
+    const session = store.get(sessionId);
+    if (!session) {
+      return c.json({ error: `no Session with id ${sessionId}` }, 404);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) {
+      return c.json({ error: 'prompt is required' }, 400);
+    }
+    if (!session.agentSessionId) {
+      return c.json({ error: `Session ${sessionId} has no resume handle from the Agent` }, 409);
+    }
+
+    const project = db
+      .prepare('SELECT dir FROM open_projects WHERE id = ?')
+      .get(session.projectId) as unknown as { dir: string };
+    store.setStatus(sessionId, 'running');
+    runSession(sessionId, { prompt, cwd: project.dir, resume: session.agentSessionId });
+    return c.json(store.get(sessionId));
   });
 
   // Answer a pending Agent question; the answer flows back into the running Session

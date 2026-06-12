@@ -56,25 +56,42 @@ export class SessionRun {
   }
 }
 
+/** Side-channel observers for a run, e.g. persisting events as they stream. */
+export interface SessionRunHooks {
+  onEvent?: (event: AgentEvent) => void;
+  /** Called once the run completes; `errored` is true if anything went wrong. */
+  onFinish?: (errored: boolean) => void;
+}
+
 /** In-memory registry of running (and finished) Session transcripts. */
 export class SessionRegistry {
   private readonly runs = new Map<number, SessionRun>();
   private readonly agents = new Map<number, AgentSession>();
 
   /** Starts pumping the Agent session's events into a new SessionRun. */
-  start(sessionId: number, agentSession: AgentSession): SessionRun {
+  start(sessionId: number, agentSession: AgentSession, hooks: SessionRunHooks = {}): SessionRun {
     const run = new SessionRun();
     this.runs.set(sessionId, run);
     this.agents.set(sessionId, agentSession);
     void (async () => {
+      let errored = false;
       try {
         for await (const event of agentSession.events) {
+          if (event.type === 'agent_error') errored = true;
           run.push(event);
+          hooks.onEvent?.(event);
         }
       } catch (err) {
-        run.push({ type: 'agent_error', message: err instanceof Error ? err.message : String(err) });
+        errored = true;
+        const event: AgentEvent = {
+          type: 'agent_error',
+          message: err instanceof Error ? err.message : String(err),
+        };
+        run.push(event);
+        hooks.onEvent?.(event);
       } finally {
         run.finish();
+        hooks.onFinish?.(errored);
       }
     })();
     return run;
