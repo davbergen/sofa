@@ -9,8 +9,18 @@ interface Project {
 }
 
 interface TranscriptEntry {
-  kind: 'assistant' | 'error' | 'resolution';
+  kind: 'assistant' | 'user' | 'error' | 'resolution';
   text: string;
+}
+
+interface PrdDraft {
+  title: string;
+  markdown: string;
+}
+
+interface PrdPublication {
+  issueNumber: number;
+  url: string;
 }
 
 type SessionStatus = 'streaming' | 'done' | 'error';
@@ -135,6 +145,90 @@ function PermissionPrompt({
   );
 }
 
+/**
+ * The PRD document panel rendered beside the Session chat. The draft is
+ * revised conversationally (no inline editing); the explicit Approve action
+ * publishes it to the Project's GitHub issue tracker.
+ */
+function PrdPanel({
+  draft,
+  published,
+  onRevise,
+  onApprove,
+}: {
+  draft: PrdDraft;
+  published: PrdPublication | null;
+  onRevise: (text: string) => void;
+  onApprove: () => void;
+}) {
+  const [revision, setRevision] = useState('');
+
+  function submitRevision(e: FormEvent) {
+    e.preventDefault();
+    const text = revision.trim();
+    if (!text) return;
+    onRevise(text);
+    setRevision('');
+  }
+
+  return (
+    <aside
+      aria-label={`PRD draft: ${draft.title}`}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        border: '1px solid #ccc',
+        borderRadius: 6,
+        padding: '1rem',
+        alignSelf: 'flex-start',
+      }}
+    >
+      <h3 style={{ marginTop: 0 }}>{draft.title}</h3>
+      <div
+        style={{
+          background: '#fff',
+          border: '1px solid #eee',
+          borderRadius: 4,
+          padding: '0.75rem',
+          whiteSpace: 'pre-wrap',
+          fontFamily: 'ui-monospace, monospace',
+          fontSize: '0.85rem',
+          maxHeight: '24rem',
+          overflowY: 'auto',
+        }}
+      >
+        {draft.markdown}
+      </div>
+      {published ? (
+        <p>
+          Published as issue #{published.issueNumber}:{' '}
+          <a href={published.url} target="_blank" rel="noreferrer">
+            {published.url}
+          </a>
+        </p>
+      ) : (
+        <>
+          <form onSubmit={submitRevision} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+            <input
+              aria-label="Revision request"
+              placeholder="Ask for a revision…"
+              value={revision}
+              onChange={(e) => setRevision(e.target.value)}
+              style={{ flex: 1, padding: '0.5rem' }}
+            />
+            <button type="submit" disabled={!revision.trim()}>
+              Revise
+            </button>
+          </form>
+          <button type="button" onClick={onApprove} style={{ marginTop: '0.75rem' }}>
+            Approve and publish to GitHub
+          </button>
+        </>
+      )}
+    </aside>
+  );
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dir, setDir] = useState('');
@@ -144,6 +238,8 @@ export function App() {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [pending, setPending] = useState<PendingInteraction[]>([]);
   const [status, setStatus] = useState<SessionStatus | null>(null);
+  const [prdDraft, setPrdDraft] = useState<PrdDraft | null>(null);
+  const [prdPublished, setPrdPublished] = useState<PrdPublication | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
 
@@ -192,6 +288,30 @@ export function App() {
     // The permission_decision event coming back over SSE clears the prompt.
   }
 
+  async function revisePrd(sessionId: number, text: string) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `sending the revision failed (${res.status})`);
+    }
+    // The updated prd_draft event coming back over SSE re-renders the panel.
+  }
+
+  async function approvePrd(sessionId: number) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/prd/approve`, { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `publishing the PRD failed (${res.status})`);
+    }
+    // The prd_published event coming back over SSE marks the panel published.
+  }
+
   async function startSession(project: Project) {
     setError(null);
     const res = await fetch(`/api/projects/${project.id}/sessions`, {
@@ -209,6 +329,8 @@ export function App() {
     setTranscript([]);
     setPending([]);
     setStatus('streaming');
+    setPrdDraft(null);
+    setPrdPublished(null);
     setPrompt('');
 
     sourceRef.current?.close();
@@ -243,6 +365,19 @@ export function App() {
         { kind: 'resolution', text: decision === 'allow' ? 'Approved tool use.' : 'Denied tool use.' },
       ]);
     });
+    source.addEventListener('user_message', (e) => {
+      const { text } = JSON.parse((e as MessageEvent).data);
+      setTranscript((t) => [...t, { kind: 'user', text }]);
+    });
+    source.addEventListener('prd_draft', (e) => {
+      const { title, markdown } = JSON.parse((e as MessageEvent).data);
+      setPrdDraft({ title, markdown });
+    });
+    source.addEventListener('prd_published', (e) => {
+      const { issueNumber, url } = JSON.parse((e as MessageEvent).data);
+      setPrdPublished({ issueNumber, url });
+      setTranscript((t) => [...t, { kind: 'resolution', text: `PRD published as issue #${issueNumber}.` }]);
+    });
     source.addEventListener('done', () => {
       setStatus('done');
       source.close();
@@ -254,7 +389,13 @@ export function App() {
   }
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 640, margin: '2rem auto' }}>
+    <main
+      style={{
+        fontFamily: 'system-ui, sans-serif',
+        maxWidth: prdDraft ? 1100 : 640,
+        margin: '2rem auto',
+      }}
+    >
       <h1>Sofa</h1>
       <form onSubmit={openProject} style={{ display: 'flex', gap: '0.5rem' }}>
         <input
@@ -306,41 +447,55 @@ export function App() {
           <p>
             <em>{session.prompt}</em>
           </p>
-          <div style={{ background: '#f6f6f6', padding: '1rem', borderRadius: 6 }}>
-            {transcript.length === 0 && pending.length === 0 && status === 'streaming' ? (
-              <p>Waiting for the Agent…</p>
-            ) : (
-              transcript.map((entry, i) => (
-                <p
-                  key={i}
-                  style={
-                    entry.kind === 'error'
-                      ? { color: 'crimson' }
-                      : entry.kind === 'resolution'
-                        ? { color: '#666', fontStyle: 'italic' }
-                        : undefined
-                  }
-                >
-                  {entry.text}
-                </p>
-              ))
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ background: '#f6f6f6', padding: '1rem', borderRadius: 6 }}>
+                {transcript.length === 0 && pending.length === 0 && status === 'streaming' ? (
+                  <p>Waiting for the Agent…</p>
+                ) : (
+                  transcript.map((entry, i) => (
+                    <p
+                      key={i}
+                      style={
+                        entry.kind === 'error'
+                          ? { color: 'crimson' }
+                          : entry.kind === 'resolution'
+                            ? { color: '#666', fontStyle: 'italic' }
+                            : entry.kind === 'user'
+                              ? { fontWeight: 600 }
+                              : undefined
+                      }
+                    >
+                      {entry.kind === 'user' ? `You: ${entry.text}` : entry.text}
+                    </p>
+                  ))
+                )}
+              </div>
+              {pending.map((interaction) =>
+                interaction.kind === 'question' ? (
+                  <QuestionForm
+                    key={interaction.questionId}
+                    pending={interaction}
+                    onSubmit={(answer) => void answerQuestion(session.id, interaction.questionId, answer)}
+                  />
+                ) : (
+                  <PermissionPrompt
+                    key={interaction.requestId}
+                    pending={interaction}
+                    onDecide={(decision) => void decidePermission(session.id, interaction.requestId, decision)}
+                  />
+                ),
+              )}
+            </div>
+            {prdDraft && (
+              <PrdPanel
+                draft={prdDraft}
+                published={prdPublished}
+                onRevise={(text) => void revisePrd(session.id, text)}
+                onApprove={() => void approvePrd(session.id)}
+              />
             )}
           </div>
-          {pending.map((interaction) =>
-            interaction.kind === 'question' ? (
-              <QuestionForm
-                key={interaction.questionId}
-                pending={interaction}
-                onSubmit={(answer) => void answerQuestion(session.id, interaction.questionId, answer)}
-              />
-            ) : (
-              <PermissionPrompt
-                key={interaction.requestId}
-                pending={interaction}
-                onDecide={(decision) => void decidePermission(session.id, interaction.requestId, decision)}
-              />
-            ),
-          )}
         </section>
       )}
     </main>

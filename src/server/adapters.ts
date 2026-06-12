@@ -54,6 +54,24 @@ export function ghGitHubAdapter(): GitHubAdapter {
       }
       return JSON.parse(res.stdout) as ReadyIssue[];
     },
+
+    async createIssue(dir, issue) {
+      const args = ['issue', 'create', '--title', issue.title, '--body', issue.body];
+      for (const label of issue.labels) {
+        args.push('--label', label);
+      }
+      const res = await exec('gh', args, dir);
+      if (res.code !== 0) {
+        throw new Error(`gh issue create failed (exit ${res.code}): ${res.stderr.trim().slice(0, 300)}`);
+      }
+      // gh prints the new issue's URL as the last stdout line.
+      const url = res.stdout.trim().split('\n').pop() ?? '';
+      const number = Number(/\/issues\/(\d+)/.exec(url)?.[1]);
+      if (!Number.isInteger(number)) {
+        throw new Error(`gh issue create returned an unexpected URL: ${url || '(empty)'}`);
+      }
+      return { number, url };
+    },
   };
 }
 

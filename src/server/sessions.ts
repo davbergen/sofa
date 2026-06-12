@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentSession } from './agent.js';
+import type { AgentEvent, AgentSession, PrdDraftEvent } from './agent.js';
 
 /**
  * The live transcript of one running Session. Buffers every Agent event so
@@ -23,6 +23,15 @@ export class SessionRun {
     const waiters = this.waiters;
     this.waiters = [];
     for (const wake of waiters) wake();
+  }
+
+  /** The latest PRD draft on the transcript, if the Agent has produced one. */
+  prdDraft(): PrdDraftEvent | undefined {
+    for (let i = this.events.length - 1; i >= 0; i--) {
+      const event = this.events[i];
+      if (event.type === 'prd_draft') return event;
+    }
+    return undefined;
   }
 
   /** Replays buffered events, then yields live ones until the Session finishes. */
