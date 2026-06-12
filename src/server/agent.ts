@@ -12,6 +12,15 @@ export interface AgentErrorEvent {
   message: string;
 }
 
+/**
+ * Announces the Agent-side session handle (the SDK session id). Sofa persists
+ * it so an interrupted Session can be resumed after a restart.
+ */
+export interface AgentSessionEvent {
+  type: 'agent_session';
+  agentSessionId: string;
+}
+
 export interface QuestionOption {
   label: string;
   description?: string;
@@ -75,6 +84,7 @@ export interface PrdPublishedEvent {
 export type AgentEvent =
   | AssistantTextEvent
   | AgentErrorEvent
+  | AgentSessionEvent
   | QuestionEvent
   | QuestionAnswerEvent
   | PermissionRequestEvent
@@ -84,10 +94,12 @@ export type AgentEvent =
   | PrdPublishedEvent;
 
 export interface AgentRunInput {
-  /** The user prompt that starts the Session. */
+  /** The user prompt that starts (or continues) the Session. */
   prompt: string;
   /** The open Project's directory; interactive Sessions run on the host against the real working copy. */
   cwd: string;
+  /** Resume an earlier Agent session by its handle (the SDK session id). */
+  resume?: string;
 }
 
 /** A handle on one running Session turn: its event stream plus the back-channel for answers. */
