@@ -100,14 +100,24 @@ export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 
 
       const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false });
       let stdout = '';
-      let stderrTail = '';
+      let stderrBuffer = '';
       child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
       child.stderr.on('data', (d: Buffer) => {
         const text = d.toString();
-        stderrTail = (stderrTail + text).slice(-2000);
         for (const [pattern, phase] of PHASE_PATTERNS) {
           if (pattern.test(text)) {
             onEvent({ type: 'phase', phase });
+          }
+        }
+        // Every complete stderr line is Worker activity (the harness mirrors
+        // the agent's output onto stderr): tool calls, files touched, tests.
+        stderrBuffer += text;
+        const lines = stderrBuffer.split('\n');
+        stderrBuffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const message = line.trim();
+          if (message) {
+            onEvent({ type: 'activity', message });
           }
         }
       });

@@ -25,6 +25,7 @@ export type WorkerPhase = 'cloning' | 'working' | 'pushing';
 /** Events a Worker container emits while it runs. */
 export type WorkerEvent =
   | { type: 'phase'; phase: WorkerPhase }
+  | { type: 'activity'; message: string }
   | { type: 'succeeded'; prUrl: string }
   | { type: 'failed'; reason: string };
 

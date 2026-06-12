@@ -36,6 +36,62 @@ function stateColor(state: RunState): string {
   return 'darkorange';
 }
 
+interface ActivityEntry {
+  message: string;
+  at: string;
+}
+
+/** How many activity lines the panel keeps on screen. */
+const MAX_FEED_LINES = 200;
+
+/**
+ * Live activity feed for one running Worker. The server replays the buffered
+ * tail first, so opening this mid-run shows recent activity immediately.
+ */
+function WorkerActivityFeed({ runId }: { runId: number }) {
+  const [entries, setEntries] = useState<ActivityEntry[]>([]);
+
+  useEffect(() => {
+    setEntries([]);
+    const source = new EventSource(`/api/runs/${runId}/activity`);
+    source.addEventListener('activity', (e) => {
+      const entry = JSON.parse((e as MessageEvent).data) as ActivityEntry;
+      setEntries((prev) => [...prev.slice(-(MAX_FEED_LINES - 1)), entry]);
+    });
+    source.addEventListener('done', () => source.close());
+    source.onerror = () => source.close();
+    return () => source.close();
+  }, [runId]);
+
+  return (
+    <div
+      role="log"
+      aria-label="Worker activity"
+      style={{
+        margin: '0.25rem 0 0.5rem',
+        padding: '0.5rem',
+        maxHeight: '12rem',
+        overflowY: 'auto',
+        background: '#1e1e1e',
+        color: '#d4d4d4',
+        fontFamily: 'monospace',
+        fontSize: '0.8rem',
+        borderRadius: '4px',
+      }}
+    >
+      {entries.length === 0 ? (
+        <div style={{ color: '#888' }}>Waiting for Worker activity…</div>
+      ) : (
+        entries.map((entry, i) => (
+          <div key={i} style={{ whiteSpace: 'pre-wrap' }}>
+            {entry.message}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 /** The factory floor for one Project: ready Issues, Dispatch, run records. */
 export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [issues, setIssues] = useState<ReadyIssue[] | null>(null);
@@ -158,6 +214,7 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
               {run.state === 'killed' && run.failureReason && (
                 <span style={{ color: 'dimgray' }}> — {run.failureReason}</span>
               )}
+              {ACTIVE.includes(run.state) && <WorkerActivityFeed runId={run.id} />}
             </li>
           ))}
         </ul>

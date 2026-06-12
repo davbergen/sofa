@@ -5,6 +5,7 @@ import { stat } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import type { Agent, AgentRunInput } from './agent.js';
 import { SessionRegistry } from './sessions.js';
+import { ActivityRegistry } from './activity.js';
 import { SessionStore } from './session-store.js';
 import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
 import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
@@ -76,6 +77,7 @@ const RUN_COLUMNS =
 export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
   const app = new Hono();
   const sessions = new SessionRegistry();
+  const activity = new ActivityRegistry();
   // Live grips on this process's Worker containers, for the kill switch.
   const workerHandles = new Map<number, WorkerHandle>();
   const store = new SessionStore(db);
@@ -288,6 +290,22 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     return c.json(rows.map(toRun));
   });
 
+  // Live Worker activity: replays the buffered tail, then streams until the
+  // run reaches a terminal state. Mirrors the Session events endpoint above.
+  app.get('/api/runs/:runId/activity', (c) => {
+    const runId = Number(c.req.param('runId'));
+    const feed = activity.get(runId);
+    if (!feed) {
+      return c.json({ error: `no activity feed for run ${runId}` }, 404);
+    }
+    return streamSSE(c, async (stream) => {
+      for await (const entry of feed.stream()) {
+        await stream.writeSSE({ event: 'activity', data: JSON.stringify(entry) });
+      }
+      await stream.writeSSE({ event: 'done', data: '{}' });
+    });
+  });
+
   app.post('/api/projects/:id/runs', async (c) => {
     if (!deps) {
       return c.json({ error: 'Container adapter not configured' }, 500);
@@ -337,9 +355,27 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .run(project.id, issue, issueTitle);
     const runId = Number(lastInsertRowid);
 
+    const feed = activity.start(runId);
     const handle = deps.container.startWorker(
       { repo, issue, ...(workerImage ? { image: workerImage } : {}) },
       (event) => {
+      // Mirror every event onto the run's live activity feed.
+      switch (event.type) {
+        case 'activity':
+          feed.push(event.message);
+          return; // feed-only; never touches the run record
+        case 'phase':
+          feed.push(`phase: ${event.phase}`);
+          break;
+        case 'succeeded':
+          feed.push(`opened PR ${event.prUrl}`);
+          feed.finish();
+          break;
+        case 'failed':
+          feed.push(`failed: ${event.reason}`);
+          feed.finish();
+          break;
+      }
       const row = db
         .prepare('SELECT state FROM worker_runs WHERE id = ?')
         .get(runId) as unknown as { state: RunState } | undefined;
@@ -392,6 +428,11 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       'killed by user',
       runId,
     );
+    const feed = activity.get(runId);
+    if (feed) {
+      feed.push('killed by user');
+      feed.finish();
+    }
 
     const updated = db
       .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE id = ?`)
