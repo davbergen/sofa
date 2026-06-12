@@ -72,6 +72,25 @@ export interface PrdPublishedEvent {
   url: string;
 }
 
+/** One Issue in a proposed breakdown, listed in dependency order. */
+export interface ProposedIssue {
+  title: string;
+  body: string;
+}
+
+/** The Agent proposed (or revised) an Issue breakdown; the UI renders it as a reviewable list. */
+export interface IssueBreakdownEvent {
+  type: 'issue_breakdown';
+  /** The proposed Issues, in dependency order. */
+  issues: ProposedIssue[];
+}
+
+/** The approved breakdown was created on the Project's GitHub issue tracker, echoed for replay. */
+export interface IssuesPublishedEvent {
+  type: 'issues_published';
+  issues: Array<{ number: number; url: string }>;
+}
+
 export type AgentEvent =
   | AssistantTextEvent
   | AgentErrorEvent
@@ -81,7 +100,9 @@ export type AgentEvent =
   | PermissionDecisionEvent
   | PrdDraftEvent
   | UserMessageEvent
-  | PrdPublishedEvent;
+  | PrdPublishedEvent
+  | IssueBreakdownEvent
+  | IssuesPublishedEvent;
 
 export interface AgentRunInput {
   /** The user prompt that starts the Session. */

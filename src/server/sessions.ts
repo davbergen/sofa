@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentSession, PrdDraftEvent } from './agent.js';
+import type { AgentEvent, AgentSession, IssueBreakdownEvent, PrdDraftEvent } from './agent.js';
 
 /**
  * The live transcript of one running Session. Buffers every Agent event so
@@ -30,6 +30,15 @@ export class SessionRun {
     for (let i = this.events.length - 1; i >= 0; i--) {
       const event = this.events[i];
       if (event.type === 'prd_draft') return event;
+    }
+    return undefined;
+  }
+
+  /** The latest proposed Issue breakdown on the transcript, if the Agent has produced one. */
+  issueBreakdown(): IssueBreakdownEvent | undefined {
+    for (let i = this.events.length - 1; i >= 0; i--) {
+      const event = this.events[i];
+      if (event.type === 'issue_breakdown') return event;
     }
     return undefined;
   }

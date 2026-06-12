@@ -23,6 +23,16 @@ interface PrdPublication {
   url: string;
 }
 
+interface ProposedIssue {
+  title: string;
+  body: string;
+}
+
+interface PublishedIssue {
+  number: number;
+  url: string;
+}
+
 type SessionStatus = 'streaming' | 'done' | 'error';
 
 interface ActiveSession {
@@ -229,6 +239,88 @@ function PrdPanel({
   );
 }
 
+/**
+ * The Issue breakdown panel rendered beside the Session chat. The proposed
+ * list (in dependency order) is revised conversationally (no inline editing);
+ * the explicit Approve action creates the Issues on GitHub, labeled
+ * ready-for-agent, in order.
+ */
+function IssueBreakdownPanel({
+  issues,
+  published,
+  onRevise,
+  onApprove,
+}: {
+  issues: ProposedIssue[];
+  published: PublishedIssue[] | null;
+  onRevise: (text: string) => void;
+  onApprove: () => void;
+}) {
+  const [revision, setRevision] = useState('');
+
+  function submitRevision(e: FormEvent) {
+    e.preventDefault();
+    const text = revision.trim();
+    if (!text) return;
+    onRevise(text);
+    setRevision('');
+  }
+
+  return (
+    <aside
+      aria-label="Proposed Issue breakdown"
+      style={{
+        flex: 1,
+        minWidth: 0,
+        border: '1px solid #ccc',
+        borderRadius: 6,
+        padding: '1rem',
+        alignSelf: 'flex-start',
+      }}
+    >
+      <h3 style={{ marginTop: 0 }}>Proposed Issues</h3>
+      <ol style={{ paddingLeft: '1.25rem', maxHeight: '24rem', overflowY: 'auto' }}>
+        {issues.map((issue, i) => (
+          <li key={i} style={{ marginBottom: '0.5rem' }}>
+            <strong>{issue.title}</strong>
+            <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', color: '#444' }}>{issue.body}</div>
+          </li>
+        ))}
+      </ol>
+      {published ? (
+        <ul>
+          {published.map((issue) => (
+            <li key={issue.number}>
+              Created issue #{issue.number}:{' '}
+              <a href={issue.url} target="_blank" rel="noreferrer">
+                {issue.url}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <>
+          <form onSubmit={submitRevision} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+            <input
+              aria-label="Breakdown revision request"
+              placeholder="Ask for a revision…"
+              value={revision}
+              onChange={(e) => setRevision(e.target.value)}
+              style={{ flex: 1, padding: '0.5rem' }}
+            />
+            <button type="submit" disabled={!revision.trim()}>
+              Revise
+            </button>
+          </form>
+          <button type="button" onClick={onApprove} style={{ marginTop: '0.75rem' }}>
+            Approve and create Issues on GitHub
+          </button>
+        </>
+      )}
+    </aside>
+  );
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dir, setDir] = useState('');
@@ -240,6 +332,8 @@ export function App() {
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [prdDraft, setPrdDraft] = useState<PrdDraft | null>(null);
   const [prdPublished, setPrdPublished] = useState<PrdPublication | null>(null);
+  const [breakdown, setBreakdown] = useState<ProposedIssue[] | null>(null);
+  const [issuesPublished, setIssuesPublished] = useState<PublishedIssue[] | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
 
@@ -312,6 +406,16 @@ export function App() {
     // The prd_published event coming back over SSE marks the panel published.
   }
 
+  async function approveIssues(sessionId: number) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/issues/approve`, { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `creating the Issues failed (${res.status})`);
+    }
+    // The issues_published event coming back over SSE marks the panel published.
+  }
+
   async function startSession(project: Project) {
     setError(null);
     const res = await fetch(`/api/projects/${project.id}/sessions`, {
@@ -331,6 +435,8 @@ export function App() {
     setStatus('streaming');
     setPrdDraft(null);
     setPrdPublished(null);
+    setBreakdown(null);
+    setIssuesPublished(null);
     setPrompt('');
 
     sourceRef.current?.close();
@@ -378,6 +484,18 @@ export function App() {
       setPrdPublished({ issueNumber, url });
       setTranscript((t) => [...t, { kind: 'resolution', text: `PRD published as issue #${issueNumber}.` }]);
     });
+    source.addEventListener('issue_breakdown', (e) => {
+      const { issues } = JSON.parse((e as MessageEvent).data);
+      setBreakdown(issues);
+    });
+    source.addEventListener('issues_published', (e) => {
+      const { issues } = JSON.parse((e as MessageEvent).data);
+      setIssuesPublished(issues);
+      setTranscript((t) => [
+        ...t,
+        { kind: 'resolution', text: `Created ${issues.length} Issue${issues.length === 1 ? '' : 's'} on GitHub.` },
+      ]);
+    });
     source.addEventListener('done', () => {
       setStatus('done');
       source.close();
@@ -392,7 +510,7 @@ export function App() {
     <main
       style={{
         fontFamily: 'system-ui, sans-serif',
-        maxWidth: prdDraft ? 1100 : 640,
+        maxWidth: prdDraft || breakdown ? 1100 : 640,
         margin: '2rem auto',
       }}
     >
@@ -493,6 +611,14 @@ export function App() {
                 published={prdPublished}
                 onRevise={(text) => void revisePrd(session.id, text)}
                 onApprove={() => void approvePrd(session.id)}
+              />
+            )}
+            {breakdown && (
+              <IssueBreakdownPanel
+                issues={breakdown}
+                published={issuesPublished}
+                onRevise={(text) => void revisePrd(session.id, text)}
+                onApprove={() => void approveIssues(session.id)}
               />
             )}
           </div>
