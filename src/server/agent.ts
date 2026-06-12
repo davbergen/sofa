@@ -1,4 +1,4 @@
-// The Agent adapter: every Claude interaction goes through this seam so the
+﻿// The Agent adapter: every Claude interaction goes through this seam so the
 // server core stays pure and testable. The real implementation wraps the
 // Claude Agent SDK (see sdk-agent.ts); tests inject a fake (see fake-agent.ts).
 
@@ -10,6 +10,15 @@ export interface AssistantTextEvent {
 export interface AgentErrorEvent {
   type: 'agent_error';
   message: string;
+}
+
+/**
+ * Announces the Agent-side session handle (the SDK session id). Sofa persists
+ * it so an interrupted Session can be resumed after a restart.
+ */
+export interface AgentSessionEvent {
+  type: 'agent_session';
+  agentSessionId: string;
 }
 
 export interface QuestionOption {
@@ -60,13 +69,14 @@ export interface FileWriteEvent {
   type: 'file_write';
   /** The written file's path as reported by the tool call. */
   path: string;
-  /** The tool that performed the write (Write, Edit, …). */
+  /** The tool that performed the write (Write, Edit, â€¦). */
   toolName: string;
 }
 
 export type AgentEvent =
   | AssistantTextEvent
   | AgentErrorEvent
+  | AgentSessionEvent
   | QuestionEvent
   | QuestionAnswerEvent
   | PermissionRequestEvent
@@ -74,12 +84,14 @@ export type AgentEvent =
   | FileWriteEvent;
 
 export interface AgentRunInput {
-  /** The user prompt that starts the Session. */
+  /** The user prompt that starts (or continues) the Session. */
   prompt: string;
   /** The open Project's directory; interactive Sessions run on the host against the real working copy. */
   cwd: string;
   /** Name of a skill from the user's ~/.claude setup to load into the Session. */
   skill?: string;
+  /** Resume an earlier Agent session by its handle (the SDK session id). */
+  resume?: string;
 }
 
 /** A handle on one running Session turn: its event stream plus the back-channel for answers. */

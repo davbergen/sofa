@@ -1,4 +1,4 @@
-import { query, type CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+﻿import { query, type CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import type {
   Agent,
   AgentRunInput,
@@ -37,7 +37,7 @@ interface AskUserQuestionInput {
 export class SdkAgent implements Agent {
   constructor(private readonly options: SdkAgentOptions = {}) {}
 
-  run({ prompt, cwd, skill }: AgentRunInput): AgentSession {
+  run({ prompt, cwd, skill, resume }: AgentRunInput): AgentSession {
     // SessionRun doubles as a push-based event buffer here, merging events
     // from the SDK message loop and the canUseTool callback into one stream.
     const out = new SessionRun();
@@ -79,6 +79,7 @@ export class SdkAgent implements Agent {
             cwd,
             maxTurns: this.options.maxTurns,
             canUseTool,
+            resume,
             // The SDK discovers skills from the same ~/.claude setup the CLI
             // uses (settingSources defaults to all sources); naming one here
             // enables it and loads its frontmatter into the system prompt.
@@ -86,7 +87,9 @@ export class SdkAgent implements Agent {
           },
         });
         for await (const message of messages) {
-          if (message.type === 'assistant') {
+          if (message.type === 'system' && message.subtype === 'init') {
+            out.push({ type: 'agent_session', agentSessionId: message.session_id });
+          } else if (message.type === 'assistant') {
             for (const block of message.message.content) {
               if (block.type === 'text' && block.text) {
                 out.push({ type: 'assistant_text', text: block.text });
