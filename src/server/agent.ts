@@ -130,6 +130,8 @@ export interface AgentRunInput {
   skill?: string;
   /** Resume an earlier Agent session by its handle (the SDK session id). */
   resume?: string;
+  /** Claude model alias (opus/sonnet/haiku/fable) from the Project's Session model setting; omitted means platform default. */
+  model?: string;
 }
 
 /** A handle on one running Session turn: its event stream plus the back-channel for answers. */

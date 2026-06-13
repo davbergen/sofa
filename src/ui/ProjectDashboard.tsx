@@ -176,14 +176,16 @@ export function ProjectDashboard({
   // editable title/body pre-filled from the Item. Null when no Item is being filed.
   const [filing, setFiling] = useState<{ id: number; title: string; body: string } | null>(null);
   const [workerModel, setWorkerModel] = useState<string | null>(null);
+  const [sessionModel, setSessionModel] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       const res = await fetch(`/api/projects/${projectId}/settings`);
       if (res.ok) {
-        const data = await res.json() as { workerModel: string | null };
+        const data = await res.json() as { workerModel: string | null; sessionModel: string | null };
         setWorkerModel(data.workerModel);
+        setSessionModel(data.sessionModel);
       }
     })();
   }, [projectId]);
@@ -196,8 +198,26 @@ export function ProjectDashboard({
       body: JSON.stringify({ workerModel: value }),
     });
     if (res.ok) {
-      const data = await res.json() as { workerModel: string | null };
+      const data = await res.json() as { workerModel: string | null; sessionModel: string | null };
       setWorkerModel(data.workerModel);
+      setSessionModel(data.sessionModel);
+    } else {
+      const body = await res.json().catch(() => null);
+      setSettingsError((body as { error?: string } | null)?.error ?? `save failed (${res.status})`);
+    }
+  }
+
+  async function saveSessionModel(value: string | null) {
+    setSettingsError(null);
+    const res = await fetch(`/api/projects/${projectId}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionModel: value }),
+    });
+    if (res.ok) {
+      const data = await res.json() as { workerModel: string | null; sessionModel: string | null };
+      setWorkerModel(data.workerModel);
+      setSessionModel(data.sessionModel);
     } else {
       const body = await res.json().catch(() => null);
       setSettingsError((body as { error?: string } | null)?.error ?? `save failed (${res.status})`);
@@ -492,13 +512,13 @@ export function ProjectDashboard({
         </div>
       </section>
 
-      {/* Worker Settings */}
-      <section className="cz-cush cz-card" aria-label="Worker Settings">
+      {/* Project Settings */}
+      <section className="cz-cush cz-card" aria-label="Project Settings">
         <div className="cz-card-h">
           <span className="ic tan">
             <GearIcon />
           </span>
-          <span className="ti">Worker Settings</span>
+          <span className="ti">Project Settings</span>
         </div>
         {settingsError && <p role="alert" className="cz-alert">{settingsError}</p>}
         <div className="cz-setting-row">
@@ -508,6 +528,21 @@ export function ProjectDashboard({
             className="cz-select"
             value={workerModel ?? ''}
             onChange={(e) => void saveWorkerModel(e.target.value || null)}
+          >
+            <option value="">Default</option>
+            <option value="opus">opus</option>
+            <option value="sonnet">sonnet</option>
+            <option value="haiku">haiku</option>
+            <option value="fable">fable</option>
+          </select>
+        </div>
+        <div className="cz-setting-row">
+          <label className="cz-setting-label" htmlFor={`session-model-${projectId}`}>Session model</label>
+          <select
+            id={`session-model-${projectId}`}
+            className="cz-select"
+            value={sessionModel ?? ''}
+            onChange={(e) => void saveSessionModel(e.target.value || null)}
           >
             <option value="">Default</option>
             <option value="opus">opus</option>

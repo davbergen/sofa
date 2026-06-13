@@ -219,8 +219,18 @@ export function createApp(
     // Optionally load a skill from the user's ~/.claude setup into the Session.
     const skill = typeof body?.skill === 'string' && body.skill.trim() ? body.skill.trim() : null;
 
+    const modelRow = db
+      .prepare('SELECT session_model FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { session_model: string | null } | undefined;
+    const sessionModel = modelRow?.session_model ?? null;
+
     const session = store.create(projectId, prompt, skill);
-    runSession(projectId, session.id, { prompt, cwd: project.dir, ...(skill ? { skill } : {}) });
+    runSession(projectId, session.id, {
+      prompt,
+      cwd: project.dir,
+      ...(skill ? { skill } : {}),
+      ...(sessionModel ? { model: sessionModel } : {}),
+    });
     return c.json(session, 201);
   });
 
@@ -557,9 +567,9 @@ export function createApp(
       return c.json({ error: 'no such Project' }, 404);
     }
     const row = db
-      .prepare('SELECT worker_model FROM open_projects WHERE id = ?')
-      .get(project.id) as unknown as { worker_model: string | null } | undefined;
-    return c.json({ workerModel: row?.worker_model ?? null });
+      .prepare('SELECT worker_model, session_model FROM open_projects WHERE id = ?')
+      .get(project.id) as unknown as { worker_model: string | null; session_model: string | null } | undefined;
+    return c.json({ workerModel: row?.worker_model ?? null, sessionModel: row?.session_model ?? null });
   });
 
   app.post('/api/projects/:id/settings', async (c) => {
@@ -568,17 +578,38 @@ export function createApp(
       return c.json({ error: 'no such Project' }, 404);
     }
     const body = await c.req.json().catch(() => null);
-    const raw = body?.workerModel;
-    // null / omitted / "Default" all map to NULL (no override).
-    const workerModel = raw === null || raw === undefined || raw === 'Default' ? null : String(raw).trim() || null;
-    if (workerModel !== null && !CURATED_MODELS.has(workerModel)) {
-      return c.json(
-        { error: `workerModel must be one of ${[...CURATED_MODELS].join(', ')} or null` },
-        422,
-      );
+
+    const hasWorkerModel = body !== null && 'workerModel' in body;
+    const hasSessionModel = body !== null && 'sessionModel' in body;
+
+    if (hasWorkerModel) {
+      const raw = body.workerModel;
+      const workerModel = raw === null || raw === undefined || raw === 'Default' ? null : String(raw).trim() || null;
+      if (workerModel !== null && !CURATED_MODELS.has(workerModel)) {
+        return c.json(
+          { error: `workerModel must be one of ${[...CURATED_MODELS].join(', ')} or null` },
+          422,
+        );
+      }
+      db.prepare('UPDATE open_projects SET worker_model = ? WHERE id = ?').run(workerModel, project.id);
     }
-    db.prepare('UPDATE open_projects SET worker_model = ? WHERE id = ?').run(workerModel, project.id);
-    return c.json({ workerModel });
+
+    if (hasSessionModel) {
+      const raw = body.sessionModel;
+      const sessionModel = raw === null || raw === undefined || raw === 'Default' ? null : String(raw).trim() || null;
+      if (sessionModel !== null && !CURATED_MODELS.has(sessionModel)) {
+        return c.json(
+          { error: `sessionModel must be one of ${[...CURATED_MODELS].join(', ')} or null` },
+          422,
+        );
+      }
+      db.prepare('UPDATE open_projects SET session_model = ? WHERE id = ?').run(sessionModel, project.id);
+    }
+
+    const row = db
+      .prepare('SELECT worker_model, session_model FROM open_projects WHERE id = ?')
+      .get(project.id) as unknown as { worker_model: string | null; session_model: string | null } | undefined;
+    return c.json({ workerModel: row?.worker_model ?? null, sessionModel: row?.session_model ?? null });
   });
 
   app.get('/api/projects/:id/runs', (c) => {

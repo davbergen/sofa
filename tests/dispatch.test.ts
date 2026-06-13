@@ -285,7 +285,7 @@ describe('Worker model selection', () => {
 
     const initial = await h.app.request(`/api/projects/${project.id}/settings`);
     expect(initial.status).toBe(200);
-    expect(await initial.json()).toEqual({ workerModel: null });
+    expect(await initial.json()).toEqual({ workerModel: null, sessionModel: null });
 
     await h.app.request(`/api/projects/${project.id}/settings`, {
       method: 'POST',
@@ -294,7 +294,7 @@ describe('Worker model selection', () => {
     });
 
     const after = await h.app.request(`/api/projects/${project.id}/settings`);
-    expect(await after.json()).toEqual({ workerModel: 'opus' });
+    expect(await after.json()).toEqual({ workerModel: 'opus', sessionModel: null });
   });
 
   it('rejects a model outside the curated alias set and stores nothing', async () => {
@@ -326,7 +326,7 @@ describe('Worker model selection', () => {
 
     const second = makeHarness(openDb(dbPath));
     const res = await second.app.request(`/api/projects/${project.id}/settings`);
-    expect(await res.json()).toEqual({ workerModel: 'sonnet' });
+    expect(await res.json()).toEqual({ workerModel: 'sonnet', sessionModel: null });
   });
 });
 

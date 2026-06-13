@@ -458,6 +458,89 @@ describe('idle-timeout', () => {
   });
 });
 
+describe('Session model selection', () => {
+  it('passes the configured session model to the Agent on start', async () => {
+    const agent = new FakeAgent();
+    const app = makeApp(agent);
+    const dir = makeDir();
+    const project = await openProject(app, dir);
+
+    await app.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionModel: 'haiku' }),
+    });
+
+    await startSession(app, project.id, 'Go');
+
+    expect(agent.runs).toEqual([{ prompt: 'Go', cwd: dir, model: 'haiku' }]);
+  });
+
+  it('omits the model from the run input when the setting is Default (null)', async () => {
+    const agent = new FakeAgent();
+    const app = makeApp(agent);
+    const project = await openProject(app, makeDir());
+
+    await startSession(app, project.id, 'Go');
+
+    expect(agent.runs[0].model).toBeUndefined();
+  });
+
+  it('worker and session models are independent — setting one does not change the other', async () => {
+    const agent = new FakeAgent();
+    const app = makeApp(agent);
+    const project = await openProject(app, makeDir());
+
+    await app.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionModel: 'opus' }),
+    });
+
+    const res = await app.request(`/api/projects/${project.id}/settings`);
+    const settings = await res.json() as { workerModel: string | null; sessionModel: string | null };
+    expect(settings.sessionModel).toBe('opus');
+    expect(settings.workerModel).toBeNull();
+  });
+
+  it('rejects a session model outside the curated alias set and stores nothing', async () => {
+    const app = makeApp();
+    const project = await openProject(app, makeDir());
+
+    const res = await app.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionModel: 'claude-opus-4-7-20251101' }),
+    });
+
+    expect(res.status).toBe(422);
+    expect((await res.json() as { error?: string }).error).toContain('sessionModel');
+    const check = await app.request(`/api/projects/${project.id}/settings`);
+    expect((await check.json() as { sessionModel: string | null }).sessionModel).toBeNull();
+  });
+
+  it('persists the session model across a server restart', async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'sofa-session-model-db-')), 'sofa.db');
+    const first = createApp(openDb(dbPath), new FakeAgent());
+    const dir = makeDir();
+    const project = await (await first.request('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir }),
+    })).json();
+
+    await first.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionModel: 'sonnet' }),
+    });
+
+    const second = createApp(openDb(dbPath), new FakeAgent());
+    const res = await second.request(`/api/projects/${project.id}/settings`);
+    expect((await res.json() as { sessionModel: string | null }).sessionModel).toBe('sonnet');
+  });
+});
+
 describe('turn-boundary events', () => {
   it('emits turn_boundary after each scripted turn', async () => {
     const app = makeApp(
