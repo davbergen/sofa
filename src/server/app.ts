@@ -89,6 +89,13 @@ export function createApp(
   skills?: SkillSource,
 ): Hono {
   const app = new Hono();
+  // Any handler that throws (e.g. a SQL error from a schema mismatch) returns a
+  // legible JSON 500 rather than a bare crash with no body — the browser can
+  // then surface the reason instead of a generic "(500)".
+  app.onError((err, c) => {
+    console.error('request failed:', err);
+    return c.json({ error: err instanceof Error ? err.message : 'internal error' }, 500);
+  });
   const sessions = new SessionRegistry();
   // Skills come from the user's real ~/.claude by default (one source of
   // truth shared with the CLI); tests inject a temp-dir source instead.
