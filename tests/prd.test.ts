@@ -20,6 +20,7 @@ function fakeGitHub() {
         url: 'https://github.com/davbergen/scratch/issues/41',
       });
     },
+    ensureLabels: () => Promise.resolve(),
   };
   return { github, created };
 }
@@ -255,6 +256,7 @@ describe('Approve', () => {
       resolveRepo: () => Promise.resolve('davbergen/scratch'),
       listReadyIssues: () => Promise.resolve([]),
       createIssue: () => Promise.reject(new Error('gh not authenticated')),
+      ensureLabels: () => Promise.resolve(),
     };
     const app = createApp(openDb(':memory:'), new FakeAgent([DRAFT]), {
       github,
