@@ -252,6 +252,8 @@ function ProjectCard({
   onToggleDashboard,
   onStart,
   onLoadSessions,
+  onStartSession,
+  onViewSession,
 }: {
   project: Project;
   skills: Skill[];
@@ -263,6 +265,8 @@ function ProjectCard({
   onToggleDashboard: () => void;
   onStart: () => void;
   onLoadSessions: () => void;
+  onStartSession: (prompt: string, skill?: string) => Promise<number>;
+  onViewSession: (sessionId: number) => void;
 }) {
   return (
     <div className="cz-project">
@@ -311,7 +315,13 @@ function ProjectCard({
         </button>
       </div>
 
-      {dashboardOpen && <ProjectDashboard projectId={project.id} />}
+      {dashboardOpen && (
+        <ProjectDashboard
+          projectId={project.id}
+          onStartSession={onStartSession}
+          onViewSession={onViewSession}
+        />
+      )}
     </div>
   );
 }
@@ -410,10 +420,7 @@ export function App() {
     // The prd_published event coming back over SSE marks the panel published.
   }
 
-  async function startSession(project: Project) {
-    setError(null);
-    const prompt = promptFor(project.id);
-    const skill = skillByProject[project.id] ?? '';
+  async function startSessionWith(project: Project, prompt: string, skill?: string): Promise<number> {
     const res = await fetch(`/api/projects/${project.id}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -421,8 +428,9 @@ export function App() {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      setError(body?.error ?? `failed to start Session (${res.status})`);
-      return;
+      const msg = body?.error ?? `failed to start Session (${res.status})`;
+      setError(msg);
+      throw new Error(msg);
     }
     const started = await res.json();
     setSession({ id: started.id, projectName: project.name, prompt });
@@ -431,8 +439,35 @@ export function App() {
     setStatus('streaming');
     setPrdDraft(null);
     setPrdPublished(null);
-    setPrompts((prev) => ({ ...prev, [project.id]: '' }));
     attachStream(started.id);
+    return started.id as number;
+  }
+
+  async function startSession(project: Project) {
+    setError(null);
+    const prompt = promptFor(project.id);
+    const skill = skillByProject[project.id] ?? '';
+    await startSessionWith(project, prompt, skill || undefined);
+    setPrompts((prev) => ({ ...prev, [project.id]: '' }));
+  }
+
+  async function viewSessionById(projectId: number, sessionId: number) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/transcript`);
+    if (!res.ok) {
+      setError(`failed to load transcript (${res.status})`);
+      return;
+    }
+    const { session: persisted, events } = (await res.json()) as {
+      session: PastSession;
+      events: TranscriptEvent[];
+    };
+    const projectName =
+      projects.find((p) => p.id === projectId)?.name ?? `Project ${projectId}`;
+    sourceRef.current?.close();
+    setSession({ id: persisted.id, projectName, prompt: persisted.prompt });
+    setTranscript(events.map(toEntry));
+    setStatus(persisted.status === 'error' ? 'error' : 'done');
   }
 
   /** Tails the live SSE event stream of a Session, appending to the transcript. */
@@ -599,6 +634,8 @@ export function App() {
             onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
             onStart={() => void startSession(p)}
             onLoadSessions={() => void loadSessions(p)}
+            onStartSession={(prompt, skill) => startSessionWith(p, prompt, skill)}
+            onViewSession={(sessionId) => void viewSessionById(p.id, sessionId)}
           />
         ))
       )}

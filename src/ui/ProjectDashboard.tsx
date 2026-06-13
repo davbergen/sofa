@@ -3,6 +3,9 @@ import { useCallback, useEffect, useState, type DragEvent } from 'react';
 interface FieldNoteItem {
   id: number;
   text: string;
+  acted: boolean;
+  action: string | null;
+  sessionId: number | null;
 }
 
 interface FieldNotes {
@@ -149,7 +152,15 @@ function NoteIcon() {
 }
 
 /** The factory floor for one Project: ready Issues, Dispatch, run records, usage. */
-export function ProjectDashboard({ projectId }: { projectId: number }) {
+export function ProjectDashboard({
+  projectId,
+  onStartSession,
+  onViewSession,
+}: {
+  projectId: number;
+  onStartSession?: (prompt: string, skill?: string) => Promise<number>;
+  onViewSession?: (sessionId: number) => void;
+}) {
   const [issues, setIssues] = useState<ReadyIssue[] | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -260,6 +271,25 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
     await refreshRuns();
   }
 
+  async function actOnItem(item: FieldNoteItem, action: 'grill' | 'implement') {
+    if (!onStartSession) return;
+    setNotesError(null);
+    const skill = action === 'grill' ? 'grill-with-docs' : undefined;
+    let sessionId: number;
+    try {
+      sessionId = await onStartSession(item.text, skill);
+    } catch {
+      return;
+    }
+    await fetch(`/api/projects/${projectId}/field-notes/items/${item.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, sessionId }),
+    });
+    const res = await fetch(`/api/projects/${projectId}/field-notes`);
+    if (res.ok) setNotes(await res.json());
+  }
+
   const total = usage?.total;
   const hasUsage = !!total && total.totalTokens > 0;
   // In/out bars are sized relative to the larger of the two, so the dominant
@@ -301,10 +331,47 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
           ) : (
             <div className="cz-fn">
               {notes.items.map((item) => (
-                <div className="cz-issue" key={item.id}>
+                <div className={`cz-issue${item.acted ? ' cz-fn-acted' : ''}`} key={item.id}>
                   <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
                     {item.text}
                   </div>
+                  {item.acted && (
+                    <div className="cz-fn-meta">
+                      <span className="cz-fn-tag">
+                        {item.action === 'grill' ? 'Grilled' : 'Implemented'}
+                      </span>
+                      {item.sessionId && onViewSession && (
+                        <button
+                          type="button"
+                          className="cz-fn-sess"
+                          onClick={() => onViewSession(item.sessionId!)}
+                        >
+                          Session #{item.sessionId}
+                        </button>
+                      )}
+                      {item.sessionId && !onViewSession && (
+                        <span className="cz-fn-sess-label">Session #{item.sessionId}</span>
+                      )}
+                    </div>
+                  )}
+                  {onStartSession && (
+                    <div className="cz-fn-acts">
+                      <button
+                        type="button"
+                        className="cz-disp"
+                        onClick={() => void actOnItem(item, 'grill')}
+                      >
+                        Grill
+                      </button>
+                      <button
+                        type="button"
+                        className="cz-disp"
+                        onClick={() => void actOnItem(item, 'implement')}
+                      >
+                        Implement directly
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

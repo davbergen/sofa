@@ -236,6 +236,31 @@ export function createApp(
     return c.json(fieldNotes.replaceForProject(projectId, parseFieldNotes(body.text)), 201);
   });
 
+  // Mark a Field Note Item acted: record which action was taken (grill /
+  // implement) and the Session id it spawned. The Item must belong to the
+  // given Project; once acted the Item is still shown and re-triggerable.
+  app.patch('/api/projects/:projectId/field-notes/items/:itemId', async (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const itemId = Number(c.req.param('itemId'));
+    const project = db
+      .prepare('SELECT id FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const action = typeof body?.action === 'string' ? body.action.trim() : '';
+    const sessionId = typeof body?.sessionId === 'number' ? body.sessionId : null;
+    if (!action || !sessionId) {
+      return c.json({ error: 'action and sessionId are required' }, 400);
+    }
+    const item = fieldNotes.markActed(projectId, itemId, action, sessionId);
+    if (!item) {
+      return c.json({ error: `no Field Note Item with id ${itemId} for Project ${projectId}` }, 404);
+    }
+    return c.json(item);
+  });
+
   // The persisted transcript: survives restarts, unlike the live event stream.
   app.get('/api/sessions/:sessionId/transcript', (c) => {
     const sessionId = Number(c.req.param('sessionId'));

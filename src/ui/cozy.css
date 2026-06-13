@@ -469,6 +469,56 @@ body {
   gap: 0;
 }
 
+/* Field Note Item — acted state: dimmed text to show progress */
+.cz-fn-acted .txt {
+  text-decoration: line-through;
+  color: var(--tx3);
+}
+
+/* Action buttons row (Grill / Implement directly) */
+.cz-fn-acts {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* Acted status badge and Session link */
+.cz-fn-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.cz-fn-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sage);
+  background: rgba(163, 173, 140, 0.15);
+  border-radius: 7px;
+  padding: 2px 9px;
+  letter-spacing: 0.01em;
+}
+.cz-fn-sess {
+  font-size: 11px;
+  font-family: 'Spline Sans Mono', monospace;
+  color: var(--tan);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.cz-fn-sess:hover {
+  color: var(--cream);
+}
+.cz-fn-sess-label {
+  font-size: 11px;
+  font-family: 'Spline Sans Mono', monospace;
+  color: var(--tx3);
+}
+
 /* empty / zero states */
 .cz-empty {
   display: flex;
