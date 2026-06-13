@@ -22,7 +22,9 @@ interface ExecResult {
 /** Runs a command without a shell; never throws, failures surface via code. */
 function exec(cmd: string, args: string[], cwd?: string): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+    // shell: true on Windows so PATH entries registered by installers (Docker,
+    // gh, git) are visible; keep shell: false on Linux/macOS (production).
+    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
