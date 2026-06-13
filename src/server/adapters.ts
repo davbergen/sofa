@@ -9,7 +9,9 @@
  *   outcome from its final machine-readable JSON stdout line.
  */
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { ContainerAdapter, GitHubAdapter, ReadyIssue, WorkerEvent } from './ports.js';
+import { coerceUsage } from './usage.js';
 
 interface ExecResult {
   code: number;
@@ -68,11 +70,21 @@ const PHASE_PATTERNS: Array<[RegExp, 'cloning' | 'working' | 'pushing']> = [
 export function parseOutcomeLine(stdout: string, exitCode: number): WorkerEvent {
   const lastLine = stdout.trim().split('\n').pop() ?? '';
   try {
-    const outcome = JSON.parse(lastLine) as { outcome: string; prUrl?: string; reason?: string };
+    const outcome = JSON.parse(lastLine) as {
+      outcome: string;
+      prUrl?: string;
+      reason?: string;
+      usage?: unknown;
+    };
+    const usage = coerceUsage(outcome.usage);
     if (outcome.outcome === 'succeeded' && outcome.prUrl) {
-      return { type: 'succeeded', prUrl: outcome.prUrl };
+      return { type: 'succeeded', prUrl: outcome.prUrl, ...(usage ? { usage } : {}) };
     }
-    return { type: 'failed', reason: outcome.reason ?? 'worker reported failure without a reason' };
+    return {
+      type: 'failed',
+      reason: outcome.reason ?? 'worker reported failure without a reason',
+      ...(usage ? { usage } : {}),
+    };
   } catch {
     return { type: 'failed', reason: `worker exited ${exitCode} without a parseable outcome line` };
   }
@@ -81,10 +93,12 @@ export function parseOutcomeLine(stdout: string, exitCode: number): WorkerEvent 
 export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 'sofa-worker'): ContainerAdapter {
   return {
     startWorker(opts, onEvent) {
+      // Named so the kill switch can `docker rm -f` this exact container.
+      const name = `sofa-worker-${randomUUID().slice(0, 8)}`;
       // Secrets are passed through from the server's environment by name
       // (`-e NAME` with no value) so tokens never appear in the argv.
       const args = [
-        'run', '--rm',
+        'run', '--rm', '--name', name,
         '-e', `WORKER_REPO=${opts.repo}`,
         '-e', `WORKER_ISSUE=${opts.issue}`,
         '-e', 'GITHUB_TOKEN',
@@ -93,18 +107,28 @@ export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 
       if (opts.baseBranch) {
         args.push('-e', `WORKER_BASE_BRANCH=${opts.baseBranch}`);
       }
-      args.push(image);
+      args.push(opts.image ?? image);
 
       const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], shell: false });
       let stdout = '';
-      let stderrTail = '';
+      let stderrBuffer = '';
       child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
       child.stderr.on('data', (d: Buffer) => {
         const text = d.toString();
-        stderrTail = (stderrTail + text).slice(-2000);
         for (const [pattern, phase] of PHASE_PATTERNS) {
           if (pattern.test(text)) {
             onEvent({ type: 'phase', phase });
+          }
+        }
+        // Every complete stderr line is Worker activity (the harness mirrors
+        // the agent's output onto stderr): tool calls, files touched, tests.
+        stderrBuffer += text;
+        const lines = stderrBuffer.split('\n');
+        stderrBuffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const message = line.trim();
+          if (message) {
+            onEvent({ type: 'activity', message });
           }
         }
       });
@@ -114,6 +138,14 @@ export function dockerContainerAdapter(image = process.env.SOFA_WORKER_IMAGE ?? 
       child.on('close', (code) => {
         onEvent(parseOutcomeLine(stdout, code ?? 1));
       });
+
+      return {
+        async stop() {
+          // Force-remove kills the container; exec never throws and a missing
+          // container (already finished) is fine — stop is idempotent.
+          await exec('docker', ['rm', '-f', name]);
+        },
+      };
     },
   };
 }

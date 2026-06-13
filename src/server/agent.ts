@@ -2,6 +2,8 @@
 // server core stays pure and testable. The real implementation wraps the
 // Claude Agent SDK (see sdk-agent.ts); tests inject a fake (see fake-agent.ts).
 
+import type { TokenUsage } from './ports.js';
+
 export interface AssistantTextEvent {
   type: 'assistant_text';
   text: string;
@@ -69,8 +71,14 @@ export interface FileWriteEvent {
   type: 'file_write';
   /** The written file's path as reported by the tool call. */
   path: string;
-  /** The tool that performed the write (Write, Edit, â€¦). */
+  /** The tool that performed the write (Write, Edit, ...). */
   toolName: string;
+}
+
+/** Token usage the SDK reported for the turn, for the quota meter. Optional: not every Agent emits one. */
+export interface UsageEvent {
+  type: 'usage';
+  usage: TokenUsage;
 }
 
 export type AgentEvent =
@@ -81,7 +89,8 @@ export type AgentEvent =
   | QuestionAnswerEvent
   | PermissionRequestEvent
   | PermissionDecisionEvent
-  | FileWriteEvent;
+  | FileWriteEvent
+  | UsageEvent;
 
 export interface AgentRunInput {
   /** The user prompt that starts (or continues) the Session. */

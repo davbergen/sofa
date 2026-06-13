@@ -99,11 +99,23 @@ export class SdkAgent implements Agent {
                 if (docWrite) out.push(docWrite);
               }
             }
-          } else if (message.type === 'result' && message.subtype !== 'success') {
+          } else if (message.type === 'result') {
+            // Surface the SDK's usage metadata for the quota meter.
             out.push({
-              type: 'agent_error',
-              message: `Agent run failed (${message.subtype})${message.errors.length ? `: ${message.errors.join('; ')}` : ''}`,
+              type: 'usage',
+              usage: {
+                inputTokens: message.usage.input_tokens ?? 0,
+                outputTokens: message.usage.output_tokens ?? 0,
+                cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
+                cacheCreationTokens: message.usage.cache_creation_input_tokens ?? 0,
+              },
             });
+            if (message.subtype !== 'success') {
+              out.push({
+                type: 'agent_error',
+                message: `Agent run failed (${message.subtype})${message.errors.length ? `: ${message.errors.join('; ')}` : ''}`,
+              });
+            }
           }
         }
       } catch (err) {
