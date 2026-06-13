@@ -1,0 +1,61 @@
+name: automerge
+
+# Label-gated unattended merge for agent PRs.
+# A PR carrying the `automerge` label is merged to master once the local gate
+# (lint + test + build) passes against the *current* master — not a stale base.
+# See docs/adr or the team note: repo has no other CI; this workflow IS the gate.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+# Serialize merges per base branch so two labeled PRs can't merge against the
+# same master concurrently. The second run waits, then re-checks out the now
+# advanced master and re-gates against the real combination (handles the
+# app.ts / agent.ts / App.tsx / ports.ts collision hotspots).
+concurrency:
+  group: automerge-${{ github.event.pull_request.base.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate-and-merge:
+    if: contains(github.event.pull_request.labels.*.name, 'automerge')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Check out the live base branch (master at job-run time), not the PR's
+      # precomputed merge ref, so a PR that merged while we were queued is
+      # already reflected here.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+
+      - name: Merge PR head into current base
+        run: |
+          git config user.name "sofa-automerge[bot]"
+          git config user.email "sofa-automerge@users.noreply.github.com"
+          git fetch origin "pull/${{ github.event.pull_request.number }}/head:pr-head"
+          if ! git merge --no-edit pr-head; then
+            echo "::error::PR conflicts with current master — needs a manual merge commit (see orchestration notes: never rebase+force-push)."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      # Gate is green against live master. Merge the PR itself (squash) so the
+      # recorded merge matches exactly what we just tested.
+      - name: Squash-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge "${{ github.event.pull_request.number }}" --squash --delete-branch
