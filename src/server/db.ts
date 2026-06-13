@@ -74,6 +74,27 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE field_note_items ADD COLUMN acted INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE field_note_items ADD COLUMN action TEXT;
   ALTER TABLE field_note_items ADD COLUMN session_id INTEGER`,
+  // Give session_id a real foreign key to sessions(id): the earlier migration
+  // added it as a plain INTEGER, and SQLite can't add a constraint to an
+  // existing column in place. Rebuild the table per SQLite's documented ALTER
+  // procedure (https://sqlite.org/lang_altertable.html#otheralter). Foreign
+  // keys must be OFF during the rebuild; openDb() turns them back ON afterward,
+  // and migrate() wraps each entry so the toggle here is scoped to this step.
+  `PRAGMA foreign_keys = OFF;
+  CREATE TABLE field_note_items_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id INTEGER NOT NULL REFERENCES field_notes(id),
+    position INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    acted INTEGER NOT NULL DEFAULT 0,
+    action TEXT,
+    session_id INTEGER REFERENCES sessions(id)
+  );
+  INSERT INTO field_note_items_new (id, note_id, position, text, acted, action, session_id)
+    SELECT id, note_id, position, text, acted, action, session_id FROM field_note_items;
+  DROP TABLE field_note_items;
+  ALTER TABLE field_note_items_new RENAME TO field_note_items;
+  PRAGMA foreign_keys = ON`,
 ];
 
 export function openDb(path: string): DatabaseSync {
