@@ -236,10 +236,11 @@ function PrdPanel({
 }
 
 /**
- * One open Project's self-contained block: its header, its own dispatch bar
- * (prompt + skill + Start Session), and its dashboard grid (expanded by
- * default, collapsible). Per-Project state keeps dispatch unambiguous when
- * several Projects are open.
+ * One open Project's self-contained block: a Grilling Session hero (the front
+ * door — type a seed, kick off a `grill-with-docs` Session), the secondary
+ * generic dispatch bar (prompt + skill + Start Session) for non-grill Sessions,
+ * and the dashboard grid (expanded by default, collapsible). Per-Project state
+ * keeps dispatch unambiguous when several Projects are open.
  */
 function ProjectCard({
   project,
@@ -268,6 +269,21 @@ function ProjectCard({
   onStartSession: (prompt: string, skill?: string) => Promise<number>;
   onViewSession: (sessionId: number) => void;
 }) {
+  const [heroSeed, setHeroSeed] = useState('');
+
+  async function submitHero(e: FormEvent) {
+    e.preventDefault();
+    const seed = heroSeed.trim();
+    if (!seed) return;
+    try {
+      await onStartSession(seed, 'grill-with-docs');
+      setHeroSeed('');
+    } catch {
+      // startSessionWith surfaces the error in the page-level banner; keep the
+      // seed in the field so the user can retry without retyping it.
+    }
+  }
+
   return (
     <div className="cz-project">
       <div className="cz-projhead">
@@ -288,7 +304,29 @@ function ProjectCard({
         </div>
       </div>
 
-      <div className="cz-cush cz-dispatch">
+      <form className="cz-cush cz-hero" onSubmit={submitHero} aria-label="Start a Grilling Session">
+        <label className="cz-hero-label" htmlFor={`hero-seed-${project.id}`}>
+          What do you want to work on today?
+        </label>
+        <div className="cz-hero-row">
+          <input
+            id={`hero-seed-${project.id}`}
+            aria-label="Grilling Session seed"
+            className="cz-hero-input"
+            placeholder="e.g. The UI needs fixing"
+            value={heroSeed}
+            onChange={(e) => setHeroSeed(e.target.value)}
+          />
+          <button type="submit" className="cz-btn tan" disabled={!heroSeed.trim()}>
+            Start Grilling
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 3l14 9-14 9z" />
+            </svg>
+          </button>
+        </div>
+      </form>
+
+      <div className="cz-cush cz-dispatch cz-dispatch-secondary">
         <input
           aria-label="Session prompt"
           className="cz-prompt"
