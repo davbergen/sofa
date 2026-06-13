@@ -9,6 +9,8 @@ export interface PersistedSession {
   id: number;
   projectId: number;
   prompt: string;
+  /** Name of the skill (from ~/.claude) loaded into the Session, if any. */
+  skill: string | null;
   startedAt: string;
   status: SessionStatus;
   /** The Agent-side resume handle (SDK session id), once the Agent announced it. */
@@ -19,6 +21,7 @@ interface SessionRow {
   id: number;
   project_id: number;
   prompt: string;
+  skill: string | null;
   started_at: string;
   status: string;
   agent_session_id: string | null;
@@ -29,13 +32,14 @@ function toSession(row: SessionRow): PersistedSession {
     id: row.id,
     projectId: row.project_id,
     prompt: row.prompt,
+    skill: row.skill,
     startedAt: row.started_at,
     status: row.status as SessionStatus,
     agentSessionId: row.agent_session_id,
   };
 }
 
-const SESSION_COLUMNS = 'id, project_id, prompt, started_at, status, agent_session_id';
+const SESSION_COLUMNS = 'id, project_id, prompt, skill, started_at, status, agent_session_id';
 
 /**
  * SQLite-backed Session memory: metadata plus the transcript, appended as
@@ -44,10 +48,10 @@ const SESSION_COLUMNS = 'id, project_id, prompt, started_at, status, agent_sessi
 export class SessionStore {
   constructor(private readonly db: DatabaseSync) {}
 
-  create(projectId: number, prompt: string): PersistedSession {
+  create(projectId: number, prompt: string, skill: string | null = null): PersistedSession {
     const { lastInsertRowid } = this.db
-      .prepare('INSERT INTO sessions (project_id, prompt) VALUES (?, ?)')
-      .run(projectId, prompt);
+      .prepare('INSERT INTO sessions (project_id, prompt, skill) VALUES (?, ?, ?)')
+      .run(projectId, prompt, skill);
     return this.get(Number(lastInsertRowid))!;
   }
 

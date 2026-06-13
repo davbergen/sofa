@@ -52,6 +52,8 @@ const MIGRATIONS: string[] = [
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
+  // The skill (from ~/.claude) loaded into the Session, if any.
+  `ALTER TABLE sessions ADD COLUMN skill TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {

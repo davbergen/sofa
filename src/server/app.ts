@@ -2,9 +2,11 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { DatabaseSync } from 'node:sqlite';
 import { stat } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import type { Agent, AgentRunInput } from './agent.js';
 import { SessionRegistry } from './sessions.js';
+import { fsSkillSource, type SkillSource } from './skills.js';
 import { ActivityRegistry } from './activity.js';
 import { SessionStore } from './session-store.js';
 import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
@@ -75,9 +77,17 @@ export interface AppDeps {
 const RUN_COLUMNS =
   'id, project_id, issue_number, issue_title, state, pr_url, failure_reason, started_at';
 
-export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
+export function createApp(
+  db: DatabaseSync,
+  agent: Agent,
+  deps?: AppDeps,
+  skills?: SkillSource,
+): Hono {
   const app = new Hono();
   const sessions = new SessionRegistry();
+  // Skills come from the user's real ~/.claude by default (one source of
+  // truth shared with the CLI); tests inject a temp-dir source instead.
+  const skillSource = skills ?? fsSkillSource(join(homedir(), '.claude'));
   const activity = new ActivityRegistry();
   // Live grips on this process's Worker containers, for the kill switch.
   const workerHandles = new Map<number, WorkerHandle>();
@@ -141,6 +151,18 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     return c.json(toProject(row), 201);
   });
 
+  // Skills discoverable from the user's ~/.claude setup, loadable into a Session.
+  app.get('/api/skills', async (c) => {
+    try {
+      return c.json(await skillSource.list());
+    } catch (err) {
+      return c.json(
+        { error: `listing skills failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
   // Start an interactive Session against an open Project.
   app.post('/api/projects/:projectId/sessions', async (c) => {
     const projectId = Number(c.req.param('projectId'));
@@ -156,9 +178,11 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     if (!prompt) {
       return c.json({ error: 'prompt is required' }, 400);
     }
+    // Optionally load a skill from the user's ~/.claude setup into the Session.
+    const skill = typeof body?.skill === 'string' && body.skill.trim() ? body.skill.trim() : null;
 
-    const session = store.create(projectId, prompt);
-    runSession(projectId, session.id, { prompt, cwd: project.dir });
+    const session = store.create(projectId, prompt, skill);
+    runSession(projectId, session.id, { prompt, cwd: project.dir, ...(skill ? { skill } : {}) });
     return c.json(session, 201);
   });
 
@@ -207,7 +231,12 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .prepare('SELECT dir FROM open_projects WHERE id = ?')
       .get(session.projectId) as unknown as { dir: string };
     store.setStatus(sessionId, 'running');
-    runSession(session.projectId, sessionId, { prompt, cwd: project.dir, resume: session.agentSessionId });
+    runSession(session.projectId, sessionId, {
+      prompt,
+      cwd: project.dir,
+      resume: session.agentSessionId,
+      ...(session.skill ? { skill: session.skill } : {}),
+    });
     return c.json(store.get(sessionId));
   });
 
