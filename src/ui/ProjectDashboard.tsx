@@ -3,7 +3,8 @@ import { useCallback, useEffect, useState, type DragEvent } from 'react';
 interface FieldNoteItem {
   id: number;
   text: string;
-  actedAction: 'grill' | 'implement' | null;
+  acted: boolean;
+  action: string | null;
   sessionId: number | null;
 }
 
@@ -150,18 +151,15 @@ function NoteIcon() {
   );
 }
 
-const ACTION_LABELS: Record<'grill' | 'implement', string> = {
-  grill: 'Grilled',
-  implement: 'Implemented',
-};
-
 /** The factory floor for one Project: ready Issues, Dispatch, run records, usage. */
 export function ProjectDashboard({
   projectId,
-  onFocusSession,
+  onStartSession,
+  onViewSession,
 }: {
   projectId: number;
-  onFocusSession?: (sessionId: number, prompt: string) => void;
+  onStartSession?: (prompt: string, skill?: string) => Promise<number>;
+  onViewSession?: (sessionId: number) => void;
 }) {
   const [issues, setIssues] = useState<ReadyIssue[] | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
@@ -172,7 +170,6 @@ export function ProjectDashboard({
   const [notes, setNotes] = useState<FieldNotes | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [actingItems, setActingItems] = useState<Record<number, boolean>>({});
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -239,29 +236,6 @@ export function ProjectDashboard({
     }
   }
 
-  async function actOnItem(item: FieldNoteItem, action: 'grill' | 'implement') {
-    setActingItems((prev) => ({ ...prev, [item.id]: true }));
-    setNotesError(null);
-    const res = await fetch(`/api/projects/${projectId}/field-notes/items/${item.id}/act`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    });
-    setActingItems((prev) => ({ ...prev, [item.id]: false }));
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      setNotesError(body?.error ?? `action failed (${res.status})`);
-      return;
-    }
-    const { session, item: updatedItem } = await res.json();
-    setNotes((prev) =>
-      prev
-        ? { ...prev, items: prev.items.map((i) => (i.id === item.id ? updatedItem : i)) }
-        : prev,
-    );
-    onFocusSession?.(session.id, session.prompt);
-  }
-
   // Poll while any Worker is active so lifecycle states update live.
   const anyActive = runs.some((r) => ACTIVE.includes(r.state));
   useEffect(() => {
@@ -295,6 +269,25 @@ export function ProjectDashboard({
       setKillError(body?.error ?? `kill failed (${res.status})`);
     }
     await refreshRuns();
+  }
+
+  async function actOnItem(item: FieldNoteItem, action: 'grill' | 'implement') {
+    if (!onStartSession) return;
+    setNotesError(null);
+    const skill = action === 'grill' ? 'grill-with-docs' : undefined;
+    let sessionId: number;
+    try {
+      sessionId = await onStartSession(item.text, skill);
+    } catch {
+      return;
+    }
+    await fetch(`/api/projects/${projectId}/field-notes/items/${item.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, sessionId }),
+    });
+    const res = await fetch(`/api/projects/${projectId}/field-notes`);
+    if (res.ok) setNotes(await res.json());
   }
 
   const total = usage?.total;
@@ -337,49 +330,50 @@ export function ProjectDashboard({
             </div>
           ) : (
             <div className="cz-fn">
-              {notes.items.map((item) => {
-                const acting = actingItems[item.id] ?? false;
-                const acted = item.actedAction !== null;
-                return (
-                  <div className={`cz-issue${acted ? ' acted' : ''}`} key={item.id}>
-                    <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
-                      {item.text}
-                    </div>
-                    {acted && item.sessionId !== null && (
-                      <div className="cz-fn-acted">
-                        <span className="cz-fn-acted-label">
-                          {ACTION_LABELS[item.actedAction!]} →
-                        </span>
+              {notes.items.map((item) => (
+                <div className={`cz-issue${item.acted ? ' cz-fn-acted' : ''}`} key={item.id}>
+                  <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
+                    {item.text}
+                  </div>
+                  {item.acted && (
+                    <div className="cz-fn-meta">
+                      <span className="cz-fn-tag">
+                        {item.action === 'grill' ? 'Grilled' : 'Implemented'}
+                      </span>
+                      {item.sessionId && onViewSession && (
                         <button
                           type="button"
-                          className="cz-fn-session-link"
-                          onClick={() => onFocusSession?.(item.sessionId!, item.text)}
+                          className="cz-fn-sess"
+                          onClick={() => onViewSession(item.sessionId!)}
                         >
                           Session #{item.sessionId}
                         </button>
-                      </div>
-                    )}
+                      )}
+                      {item.sessionId && !onViewSession && (
+                        <span className="cz-fn-sess-label">Session #{item.sessionId}</span>
+                      )}
+                    </div>
+                  )}
+                  {onStartSession && (
                     <div className="cz-fn-acts">
                       <button
                         type="button"
-                        className="cz-fn-act grill"
-                        disabled={acting}
+                        className="cz-disp"
                         onClick={() => void actOnItem(item, 'grill')}
                       >
                         Grill
                       </button>
                       <button
                         type="button"
-                        className="cz-fn-act implement"
-                        disabled={acting}
+                        className="cz-disp"
                         onClick={() => void actOnItem(item, 'implement')}
                       >
-                        Implement
+                        Implement directly
                       </button>
                     </div>
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>

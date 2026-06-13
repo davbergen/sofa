@@ -252,7 +252,8 @@ function ProjectCard({
   onToggleDashboard,
   onStart,
   onLoadSessions,
-  onFocusSession,
+  onStartSession,
+  onViewSession,
 }: {
   project: Project;
   skills: Skill[];
@@ -264,7 +265,8 @@ function ProjectCard({
   onToggleDashboard: () => void;
   onStart: () => void;
   onLoadSessions: () => void;
-  onFocusSession: (sessionId: number, prompt: string) => void;
+  onStartSession: (prompt: string, skill?: string) => Promise<number>;
+  onViewSession: (sessionId: number) => void;
 }) {
   return (
     <div className="cz-project">
@@ -314,7 +316,11 @@ function ProjectCard({
       </div>
 
       {dashboardOpen && (
-        <ProjectDashboard projectId={project.id} onFocusSession={onFocusSession} />
+        <ProjectDashboard
+          projectId={project.id}
+          onStartSession={onStartSession}
+          onViewSession={onViewSession}
+        />
       )}
     </div>
   );
@@ -414,10 +420,7 @@ export function App() {
     // The prd_published event coming back over SSE marks the panel published.
   }
 
-  async function startSession(project: Project) {
-    setError(null);
-    const prompt = promptFor(project.id);
-    const skill = skillByProject[project.id] ?? '';
+  async function startSessionWith(project: Project, prompt: string, skill?: string): Promise<number> {
     const res = await fetch(`/api/projects/${project.id}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -425,8 +428,9 @@ export function App() {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      setError(body?.error ?? `failed to start Session (${res.status})`);
-      return;
+      const msg = body?.error ?? `failed to start Session (${res.status})`;
+      setError(msg);
+      throw new Error(msg);
     }
     const started = await res.json();
     setSession({ id: started.id, projectName: project.name, prompt });
@@ -435,8 +439,35 @@ export function App() {
     setStatus('streaming');
     setPrdDraft(null);
     setPrdPublished(null);
-    setPrompts((prev) => ({ ...prev, [project.id]: '' }));
     attachStream(started.id);
+    return started.id as number;
+  }
+
+  async function startSession(project: Project) {
+    setError(null);
+    const prompt = promptFor(project.id);
+    const skill = skillByProject[project.id] ?? '';
+    await startSessionWith(project, prompt, skill || undefined);
+    setPrompts((prev) => ({ ...prev, [project.id]: '' }));
+  }
+
+  async function viewSessionById(projectId: number, sessionId: number) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/transcript`);
+    if (!res.ok) {
+      setError(`failed to load transcript (${res.status})`);
+      return;
+    }
+    const { session: persisted, events } = (await res.json()) as {
+      session: PastSession;
+      events: TranscriptEvent[];
+    };
+    const projectName =
+      projects.find((p) => p.id === projectId)?.name ?? `Project ${projectId}`;
+    sourceRef.current?.close();
+    setSession({ id: persisted.id, projectName, prompt: persisted.prompt });
+    setTranscript(events.map(toEntry));
+    setStatus(persisted.status === 'error' ? 'error' : 'done');
   }
 
   /** Tails the live SSE event stream of a Session, appending to the transcript. */
@@ -509,37 +540,6 @@ export function App() {
       return;
     }
     setPastSessions(await res.json());
-  }
-
-  /**
-   * Focuses an existing Session: loads its transcript and, if still running,
-   * attaches the live event stream. Used by Field Note Item actions and their
-   * session links so both the initial act and later re-visits go through one path.
-   */
-  async function focusSession(project: Project, sessionId: number, prompt: string) {
-    setError(null);
-    const res = await fetch(`/api/sessions/${sessionId}/transcript`);
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      setError(body?.error ?? `failed to load Session transcript (${res.status})`);
-      return;
-    }
-    const { session: persisted, events } = (await res.json()) as {
-      session: PastSession;
-      events: TranscriptEvent[];
-    };
-    sourceRef.current?.close();
-    setSession({ id: sessionId, projectName: project.name, prompt });
-    setTranscript((events as TranscriptEvent[]).map(toEntry));
-    setPending([]);
-    setPrdDraft(null);
-    setPrdPublished(null);
-    if (persisted.status === 'running') {
-      setStatus('streaming');
-      attachStream(sessionId);
-    } else {
-      setStatus(persisted.status === 'error' ? 'error' : 'done');
-    }
   }
 
   /** Shows the persisted transcript of a past Session. */
@@ -634,7 +634,8 @@ export function App() {
             onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
             onStart={() => void startSession(p)}
             onLoadSessions={() => void loadSessions(p)}
-            onFocusSession={(sessionId, prompt) => void focusSession(p, sessionId, prompt)}
+            onStartSession={(prompt, skill) => startSessionWith(p, prompt, skill)}
+            onViewSession={(sessionId) => void viewSessionById(p.id, sessionId)}
           />
         ))
       )}

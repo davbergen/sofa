@@ -4,9 +4,8 @@ import type { DatabaseSync } from 'node:sqlite';
 export interface FieldNoteItem {
   id: number;
   text: string;
-  /** The action taken on this Item, or null if not yet acted on. */
-  actedAction: 'grill' | 'implement' | null;
-  /** The Session spawned when this Item was acted on, or null. */
+  acted: boolean;
+  action: string | null;
   sessionId: number | null;
 }
 
@@ -23,17 +22,9 @@ export interface FieldNotes {
 interface ItemRow {
   id: number;
   text: string;
-  acted_action: string | null;
+  acted: number;
+  action: string | null;
   session_id: number | null;
-}
-
-function toItem(row: ItemRow): FieldNoteItem {
-  return {
-    id: row.id,
-    text: row.text,
-    actedAction: (row.acted_action as 'grill' | 'implement' | null) ?? null,
-    sessionId: row.session_id ?? null,
-  };
 }
 
 /**
@@ -71,6 +62,37 @@ export class FieldNotesStore {
     return this.getForProject(projectId);
   }
 
+  /**
+   * Records that David acted on an Item. Verifies the Item belongs to the given
+   * Project so callers need not do a separate ownership check. Returns the
+   * updated Item, or null if no matching Item is found for that Project.
+   */
+  markActed(projectId: number, itemId: number, action: string, sessionId: number): FieldNoteItem | null {
+    const check = this.db
+      .prepare(
+        `SELECT fni.id FROM field_note_items fni
+         JOIN field_notes fn ON fn.id = fni.note_id
+         WHERE fni.id = ? AND fn.project_id = ?`,
+      )
+      .get(itemId, projectId) as unknown as { id: number } | undefined;
+    if (!check) return null;
+
+    this.db
+      .prepare('UPDATE field_note_items SET acted = 1, action = ?, session_id = ? WHERE id = ?')
+      .run(action, sessionId, itemId);
+
+    const row = this.db
+      .prepare('SELECT id, text, acted, action, session_id FROM field_note_items WHERE id = ?')
+      .get(itemId) as unknown as ItemRow;
+    return {
+      id: row.id,
+      text: row.text,
+      acted: row.acted !== 0,
+      action: row.action,
+      sessionId: row.session_id,
+    };
+  }
+
   getForProject(projectId: number): FieldNotes {
     const note = this.db
       .prepare('SELECT id FROM field_notes WHERE project_id = ?')
@@ -79,21 +101,17 @@ export class FieldNotesStore {
       return { hasNote: false, items: [] };
     }
     const rows = this.db
-      .prepare(
-        'SELECT id, text, acted_action, session_id FROM field_note_items WHERE note_id = ? ORDER BY position',
-      )
+      .prepare('SELECT id, text, acted, action, session_id FROM field_note_items WHERE note_id = ? ORDER BY position')
       .all(note.id) as unknown as ItemRow[];
-    return { hasNote: true, items: rows.map(toItem) };
-  }
-
-  /** Records that an Item was acted on and links it to the Session it spawned. */
-  actItem(itemId: number, action: 'grill' | 'implement', sessionId: number): FieldNoteItem {
-    this.db
-      .prepare('UPDATE field_note_items SET acted_action = ?, session_id = ? WHERE id = ?')
-      .run(action, sessionId, itemId);
-    const row = this.db
-      .prepare('SELECT id, text, acted_action, session_id FROM field_note_items WHERE id = ?')
-      .get(itemId) as unknown as ItemRow;
-    return toItem(row);
+    return {
+      hasNote: true,
+      items: rows.map((row) => ({
+        id: row.id,
+        text: row.text,
+        acted: row.acted !== 0,
+        action: row.action,
+        sessionId: row.session_id,
+      })),
+    };
   }
 }

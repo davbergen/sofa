@@ -68,10 +68,12 @@ const MIGRATIONS: string[] = [
     position INTEGER NOT NULL,
     text TEXT NOT NULL
   )`,
-  // Field Note Item acted status: the action taken and the Session it spawned
-  // (nullable FK — null until the Item is first acted on).
-  `ALTER TABLE field_note_items ADD COLUMN acted_action TEXT;
-   ALTER TABLE field_note_items ADD COLUMN session_id INTEGER REFERENCES sessions(id)`,
+  // Field Note acted status: per-Item progress David makes through the list.
+  // acted = whether the item has been acted on; action = 'grill' | 'implement';
+  // session_id = the Session it spawned (nullable until acted).
+  `ALTER TABLE field_note_items ADD COLUMN acted INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE field_note_items ADD COLUMN action TEXT;
+  ALTER TABLE field_note_items ADD COLUMN session_id INTEGER`,
 ];
 
 export function openDb(path: string): DatabaseSync {

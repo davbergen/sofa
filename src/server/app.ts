@@ -236,52 +236,29 @@ export function createApp(
     return c.json(fieldNotes.replaceForProject(projectId, parseFieldNotes(body.text)), 201);
   });
 
-  // Act on a Field Note Item: start a Session with the Item's text as prompt.
-  // 'grill' loads the grill-with-docs skill; 'implement' uses no skill.
-  // The spawned Session id is stored on the Item so the link survives restarts.
-  app.post('/api/projects/:projectId/field-notes/items/:itemId/act', async (c) => {
+  // Mark a Field Note Item acted: record which action was taken (grill /
+  // implement) and the Session id it spawned. The Item must belong to the
+  // given Project; once acted the Item is still shown and re-triggerable.
+  app.patch('/api/projects/:projectId/field-notes/items/:itemId', async (c) => {
     const projectId = Number(c.req.param('projectId'));
     const itemId = Number(c.req.param('itemId'));
-
     const project = db
-      .prepare('SELECT id, dir, name, opened_at FROM open_projects WHERE id = ?')
-      .get(projectId) as unknown as ProjectRow | undefined;
+      .prepare('SELECT id FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
     if (!project) {
       return c.json({ error: `no open Project with id ${projectId}` }, 404);
     }
-
-    // Verify the item exists and belongs to this project.
-    const itemCheck = db
-      .prepare(
-        `SELECT fni.id, fni.text
-         FROM field_note_items fni
-         JOIN field_notes fn ON fn.id = fni.note_id
-         WHERE fni.id = ? AND fn.project_id = ?`,
-      )
-      .get(itemId, projectId) as unknown as { id: number; text: string } | undefined;
-    if (!itemCheck) {
-      return c.json(
-        { error: `no Field Note Item with id ${itemId} for Project ${projectId}` },
-        404,
-      );
-    }
-
     const body = await c.req.json().catch(() => null);
-    const action = body?.action;
-    if (action !== 'grill' && action !== 'implement') {
-      return c.json({ error: "action must be 'grill' or 'implement'" }, 400);
+    const action = typeof body?.action === 'string' ? body.action.trim() : '';
+    const sessionId = typeof body?.sessionId === 'number' ? body.sessionId : null;
+    if (!action || !sessionId) {
+      return c.json({ error: 'action and sessionId are required' }, 400);
     }
-
-    const skill = action === 'grill' ? 'grill-with-docs' : null;
-    const session = store.create(projectId, itemCheck.text, skill);
-    runSession(projectId, session.id, {
-      prompt: itemCheck.text,
-      cwd: project.dir,
-      ...(skill ? { skill } : {}),
-    });
-
-    const item = fieldNotes.actItem(itemId, action, session.id);
-    return c.json({ session, item }, 201);
+    const item = fieldNotes.markActed(projectId, itemId, action, sessionId);
+    if (!item) {
+      return c.json({ error: `no Field Note Item with id ${itemId} for Project ${projectId}` }, 404);
+    }
+    return c.json(item);
   });
 
   // The persisted transcript: survives restarts, unlike the live event stream.
