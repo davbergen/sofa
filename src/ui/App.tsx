@@ -341,10 +341,25 @@ export function App() {
   const [prdPublished, setPrdPublished] = useState<PrdPublication | null>(null);
   const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+  const sessionSectionRef = useRef<HTMLElement | null>(null);
   // Dashboards are expanded by default; this tracks the ones the user collapsed.
   const [hiddenDashboards, setHiddenDashboards] = useState<Record<number, boolean>>({});
 
   const promptFor = (id: number) => prompts[id] ?? '';
+
+  // The Session transcript renders below the Project cards, so activating a
+  // Session (start, view, or resume) otherwise leaves the conversation below
+  // the fold. Pull it into view and focus its message input when one exists.
+  useEffect(() => {
+    if (session === null) return;
+    const section = sessionSectionRef.current;
+    if (section === null) return;
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const input = section.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      'input:not([type="radio"]):not([type="checkbox"]), textarea',
+    );
+    input?.focus();
+  }, [session?.id]);
 
   async function refresh() {
     const res = await fetch('/api/projects');
@@ -676,7 +691,7 @@ export function App() {
       )}
 
       {session && (
-        <section aria-label="Session transcript" className="cz-section">
+        <section ref={sessionSectionRef} aria-label="Session transcript" className="cz-section">
           <h2>
             Session #{session.id} — {session.projectName}{' '}
             <span className="cz-muted">({status === 'streaming' ? 'streaming…' : status})</span>
