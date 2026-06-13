@@ -161,7 +161,9 @@ export class SdkAgent implements Agent {
                 cacheCreationTokens: message.usage.cache_creation_input_tokens ?? 0,
               },
             });
-            if (message.subtype !== 'success') {
+            if (message.subtype === 'success') {
+              out.push({ type: 'turn_boundary' });
+            } else {
               out.push({
                 type: 'agent_error',
                 message: `Agent run failed (${message.subtype})${message.errors.length ? `: ${message.errors.join('; ')}` : ''}`,

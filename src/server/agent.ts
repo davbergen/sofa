@@ -101,6 +101,11 @@ export interface UsageEvent {
   usage: TokenUsage;
 }
 
+/** Emitted when the agent completes a turn and is ready for user input. */
+export interface TurnBoundaryEvent {
+  type: 'turn_boundary';
+}
+
 export type AgentEvent =
   | AssistantTextEvent
   | AgentErrorEvent
@@ -113,7 +118,8 @@ export type AgentEvent =
   | UserMessageEvent
   | PrdPublishedEvent
   | FileWriteEvent
-  | UsageEvent;
+  | UsageEvent
+  | TurnBoundaryEvent;
 
 export interface AgentRunInput {
   /** The user prompt that starts (or continues) the Session. */

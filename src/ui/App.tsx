@@ -28,7 +28,7 @@ interface PrdPublication {
   url: string;
 }
 
-type SessionStatus = 'streaming' | 'done' | 'error';
+type SessionStatus = 'streaming' | 'awaiting' | 'done' | 'error';
 
 interface ActiveSession {
   id: number;
@@ -343,6 +343,7 @@ export function App() {
   const [composerText, setComposerText] = useState('');
   const sourceRef = useRef<EventSource | null>(null);
   const sessionSectionRef = useRef<HTMLElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   // Dashboards are expanded by default; this tracks the ones the user collapsed.
   const [hiddenDashboards, setHiddenDashboards] = useState<Record<number, boolean>>({});
 
@@ -361,6 +362,10 @@ export function App() {
     );
     input?.focus();
   }, [session?.id]);
+
+  useEffect(() => {
+    if (status === 'awaiting') composerRef.current?.focus();
+  }, [status]);
 
   async function refresh() {
     const res = await fetch('/api/projects');
@@ -508,6 +513,7 @@ export function App() {
     source.addEventListener('assistant_text', (e) => {
       const { text } = JSON.parse((e as MessageEvent).data);
       setTranscript((t) => [...t, { kind: 'assistant', text }]);
+      setStatus('streaming');
     });
     source.addEventListener('agent_error', (e) => {
       const { message } = JSON.parse((e as MessageEvent).data);
@@ -539,9 +545,13 @@ export function App() {
         { kind: 'resolution', text: decision === 'allow' ? 'Approved tool use.' : 'Denied tool use.' },
       ]);
     });
+    source.addEventListener('turn_boundary', () => {
+      setStatus('awaiting');
+    });
     source.addEventListener('user_message', (e) => {
       const { text } = JSON.parse((e as MessageEvent).data);
       setTranscript((t) => [...t, { kind: 'user', text }]);
+      setStatus('streaming');
     });
     source.addEventListener('prd_draft', (e) => {
       const { title, markdown } = JSON.parse((e as MessageEvent).data);
@@ -709,7 +719,7 @@ export function App() {
         <section ref={sessionSectionRef} aria-label="Session transcript" className="cz-section">
           <h2>
             Session #{session.id} — {session.projectName}{' '}
-            <span className="cz-muted">({status === 'streaming' ? 'streaming…' : status})</span>
+            <span className="cz-muted">({status === 'streaming' ? 'thinking…' : status === 'awaiting' ? 'awaiting…' : status})</span>
           </h2>
           <p className="lede">{session.prompt}</p>
           <div className="cz-split">
@@ -741,17 +751,22 @@ export function App() {
                 ),
               )}
               {status === 'streaming' && pending.length === 0 && (
+                <p className="cz-thinking">thinking…</p>
+              )}
+              {status === 'awaiting' && pending.length === 0 && (
                 <form
                   className="cz-composer"
                   onSubmit={(e) => {
                     e.preventDefault();
                     const text = composerText.trim();
                     if (!text) return;
+                    setStatus('streaming');
                     void sendSessionMessage(session.id, text);
                     setComposerText('');
                   }}
                 >
                   <textarea
+                    ref={composerRef}
                     aria-label="Message"
                     className="cz-field"
                     rows={2}
@@ -763,6 +778,7 @@ export function App() {
                         e.preventDefault();
                         const text = composerText.trim();
                         if (!text) return;
+                        setStatus('streaming');
                         void sendSessionMessage(session.id, text);
                         setComposerText('');
                       }

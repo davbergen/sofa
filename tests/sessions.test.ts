@@ -322,3 +322,69 @@ describe('multi-turn conversation', () => {
     await sse.until('done');
   });
 });
+
+describe('turn-boundary events', () => {
+  it('emits turn_boundary after each scripted turn', async () => {
+    const app = makeApp(
+      new FakeAgent([
+        { type: 'assistant_text', text: 'Hello.' },
+        { type: 'turn_boundary' },
+      ]),
+    );
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Go')).json();
+
+    const events = await readSse(app, session.id);
+    const types = events.map((e) => e.event);
+
+    expect(types).toContain('turn_boundary');
+    const textIdx = types.indexOf('assistant_text');
+    const tbIdx = types.indexOf('turn_boundary');
+    const doneIdx = types.indexOf('done');
+    expect(tbIdx).toBeGreaterThan(textIdx);
+    expect(tbIdx).toBeLessThan(doneIdx);
+  });
+
+  it('emits turn_boundary between turns in a multi-turn exchange', async () => {
+    const script: FakeAgentStep[] = [
+      { type: 'assistant_text', text: 'Turn 1.' },
+      { type: 'turn_boundary' },
+      { type: 'await_message' },
+      { type: 'assistant_text', text: 'Turn 2.' },
+      { type: 'turn_boundary' },
+    ];
+    const app = makeApp(new FakeAgent(script));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Start')).json();
+
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+
+    await sse.until('assistant_text');
+    const tb1 = await sse.until('turn_boundary');
+    expect(tb1.event).toBe('turn_boundary');
+
+    await postMessage(app, session.id, 'Continue');
+    await sse.until('user_message');
+    await sse.until('assistant_text');
+    const tb2 = await sse.until('turn_boundary');
+    expect(tb2.event).toBe('turn_boundary');
+
+    await sse.until('done');
+  });
+
+  it('replays turn_boundary events to a late subscriber', async () => {
+    const app = makeApp(
+      new FakeAgent([
+        { type: 'assistant_text', text: 'Hi.' },
+        { type: 'turn_boundary' },
+      ]),
+    );
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Go')).json();
+
+    await readSse(app, session.id);
+    const replay = await readSse(app, session.id);
+
+    expect(replay.some((e) => e.event === 'turn_boundary')).toBe(true);
+  });
+});
