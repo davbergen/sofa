@@ -11,12 +11,27 @@ export interface ReadyIssue {
   url: string;
 }
 
+/** An issue to create on the Project's GitHub issue tracker (e.g. an approved PRD). */
+export interface NewIssue {
+  title: string;
+  body: string;
+  labels: string[];
+}
+
+/** The issue GitHub created in response to a NewIssue. */
+export interface CreatedIssue {
+  number: number;
+  url: string;
+}
+
 /** Wraps the GitHub boundary (gh CLI / API) for a Project directory. */
 export interface GitHubAdapter {
   /** Resolves the Project directory's repository as `owner/name`. */
   resolveRepo(dir: string): Promise<string>;
   /** Lists open Issues in the Project's repository that are ready for a Worker. */
   listReadyIssues(dir: string): Promise<ReadyIssue[]>;
+  /** Creates an issue in the Project's repository and returns its number and URL. */
+  createIssue(dir: string, issue: NewIssue): Promise<CreatedIssue>;
 }
 
 /** Lifecycle phases a running Worker reports before it finishes. */

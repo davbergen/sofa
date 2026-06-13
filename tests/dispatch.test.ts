@@ -33,6 +33,10 @@ function fakeGitHub(issues: ReadyIssue[] = ISSUES) {
       calls.push(`listReadyIssues ${dir}`);
       return Promise.resolve(issues);
     },
+    createIssue(dir, issue) {
+      calls.push(`createIssue ${dir} ${issue.title}`);
+      return Promise.resolve({ number: 42, url: 'https://github.com/davbergen/scratch/issues/42' });
+    },
   };
   return { github, calls };
 }
@@ -110,6 +114,7 @@ describe('ready Issues', () => {
     const failing: GitHubAdapter = {
       resolveRepo: () => Promise.reject(new Error('gh not authenticated')),
       listReadyIssues: () => Promise.reject(new Error('gh not authenticated')),
+      createIssue: () => Promise.reject(new Error('gh not authenticated')),
     };
     const app = createApp(openDb(':memory:'), new FakeAgent(), { github: failing, container: fakeContainer().container });
     const { project } = await openProject(app);
@@ -177,6 +182,7 @@ describe('dispatching a Worker', () => {
     const failing: GitHubAdapter = {
       resolveRepo: () => Promise.reject(new Error('no origin remote')),
       listReadyIssues: () => Promise.resolve([]),
+      createIssue: () => Promise.reject(new Error('no origin remote')),
     };
     const app = createApp(openDb(':memory:'), new FakeAgent(), { github: failing, container: fakeContainer().container });
     const { project } = await openProject(app);

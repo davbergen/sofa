@@ -16,10 +16,19 @@ export interface FakeAgentOptions {
 }
 
 /**
+ * A scripted step for the FakeAgent: either an event to emit, or the
+ * `await_message` marker, which pauses the stream until the next follow-up
+ * user message arrives via `sendMessage` (how tests script conversational
+ * revision: draft, await the revision request, then emit the revised draft).
+ */
+export type FakeAgentStep = AgentEvent | { type: 'await_message' };
+
+/**
  * Test double for the Agent adapter: emits a scripted sequence of events.
  * A scripted `question` pauses the stream until `answerQuestion` arrives;
  * a scripted `permission_request` pauses until `decidePermission` arrives,
- * recording whether the gated tool call would have executed.
+ * recording whether the gated tool call would have executed; an
+ * `await_message` step pauses until `sendMessage` arrives.
  */
 export class FakeAgent implements Agent {
   readonly runs: AgentRunInput[] = [];
@@ -27,13 +36,17 @@ export class FakeAgent implements Agent {
   readonly answers: Array<{ questionId: string; answer: string }> = [];
   /** Permission decisions routed back into the running session, in arrival order. */
   readonly decisions: Array<{ requestId: string; decision: PermissionDecision }> = [];
+  /** Follow-up user messages routed into the running session, in arrival order. */
+  readonly messages: string[] = [];
   /** Outcome of each scripted gated tool call: executed on 'allow', skipped on 'deny'. */
   readonly toolOutcomes = new Map<string, 'executed' | 'skipped'>();
 
   private readonly resolvers = new Map<string, (value: string) => void>();
+  private readonly messageWaiters: Array<() => void> = [];
+  private undeliveredMessages = 0;
 
   constructor(
-    private readonly script: AgentEvent[] = [{ type: 'assistant_text', text: 'Hello from the fake Agent.' }],
+    private readonly script: FakeAgentStep[] = [{ type: 'assistant_text', text: 'Hello from the fake Agent.' }],
     private readonly options: FakeAgentOptions = {},
   ) {}
 
@@ -48,6 +61,15 @@ export class FakeAgent implements Agent {
       decidePermission: (requestId, decision) => {
         this.decisions.push({ requestId, decision });
         this.resolve(`permission:${requestId}`, decision);
+      },
+      sendMessage: (text) => {
+        this.messages.push(text);
+        const waiter = this.messageWaiters.shift();
+        if (waiter) {
+          waiter();
+        } else {
+          this.undeliveredMessages++;
+        }
       },
     };
   }
@@ -66,16 +88,24 @@ export class FakeAgent implements Agent {
     }
   }
 
-  private async *emit(script: AgentEvent[]): AsyncGenerator<AgentEvent> {
-    for (const event of script) {
+  private async *emit(script: FakeAgentStep[]): AsyncGenerator<AgentEvent> {
+    for (const step of script) {
       // Yield asynchronously so events stream like a real Agent's would.
       await new Promise((resolve) => setImmediate(resolve));
-      yield event;
-      if (event.type === 'question') {
-        await this.wait(`question:${event.questionId}`);
-      } else if (event.type === 'permission_request') {
-        const decision = await this.wait(`permission:${event.requestId}`);
-        this.toolOutcomes.set(event.requestId, decision === 'allow' ? 'executed' : 'skipped');
+      if (step.type === 'await_message') {
+        if (this.undeliveredMessages > 0) {
+          this.undeliveredMessages--;
+        } else {
+          await new Promise<void>((resolve) => this.messageWaiters.push(resolve));
+        }
+        continue;
+      }
+      yield step;
+      if (step.type === 'question') {
+        await this.wait(`question:${step.questionId}`);
+      } else if (step.type === 'permission_request') {
+        const decision = await this.wait(`permission:${step.requestId}`);
+        this.toolOutcomes.set(step.requestId, decision === 'allow' ? 'executed' : 'skipped');
       }
     }
   }

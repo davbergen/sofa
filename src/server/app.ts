@@ -77,6 +77,9 @@ export interface AppDeps {
 const RUN_COLUMNS =
   'id, project_id, issue_number, issue_title, state, pr_url, failure_reason, started_at';
 
+/** Label applied to every published PRD on the Project's GitHub issue tracker. */
+export const PRD_LABEL = 'prd';
+
 export function createApp(
   db: DatabaseSync,
   agent: Agent,
@@ -277,6 +280,64 @@ export function createApp(
     agentSession.decidePermission(requestId, decision);
     run.push({ type: 'permission_decision', requestId, decision });
     return c.json({ ok: true });
+  });
+
+  // Send a follow-up user message into a running Session (e.g. a PRD revision
+  // request); it is echoed onto the transcript so all subscribers see it.
+  app.post('/api/sessions/:sessionId/message', async (c) => {
+    const sessionId = Number(c.req.param('sessionId'));
+    const run = sessions.get(sessionId);
+    const agentSession = sessions.agent(sessionId);
+    if (!run || !agentSession) {
+      return c.json({ error: `no running Session with id ${sessionId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const text = typeof body?.text === 'string' ? body.text.trim() : '';
+    if (!text) {
+      return c.json({ error: 'text is required' }, 400);
+    }
+    agentSession.sendMessage(text);
+    run.push({ type: 'user_message', text });
+    return c.json({ ok: true });
+  });
+
+  // Approve the Session's current PRD draft: publish it to the Project's
+  // GitHub issue tracker. Nothing reaches GitHub before this explicit action.
+  app.post('/api/sessions/:sessionId/prd/approve', async (c) => {
+    if (!deps) {
+      return c.json({ error: 'GitHub adapter not configured' }, 500);
+    }
+    const sessionId = Number(c.req.param('sessionId'));
+    const run = sessions.get(sessionId);
+    if (!run) {
+      return c.json({ error: `no running Session with id ${sessionId}` }, 404);
+    }
+    const draft = run.prdDraft();
+    if (!draft) {
+      return c.json({ error: 'the Session has no PRD draft to approve' }, 409);
+    }
+    const project = db
+      .prepare(
+        'SELECT p.dir AS dir FROM sessions s JOIN open_projects p ON p.id = s.project_id WHERE s.id = ?',
+      )
+      .get(sessionId) as unknown as { dir: string } | undefined;
+    if (!project) {
+      return c.json({ error: `no Project for Session ${sessionId}` }, 404);
+    }
+    try {
+      const created = await deps.github.createIssue(project.dir, {
+        title: draft.title,
+        body: draft.markdown,
+        labels: [PRD_LABEL],
+      });
+      run.push({ type: 'prd_published', issueNumber: created.number, url: created.url });
+      return c.json(created, 201);
+    } catch (err) {
+      return c.json(
+        { error: `publishing the PRD failed: ${err instanceof Error ? err.message : String(err)}` },
+        502,
+      );
+    }
   });
 
   // Live transcript: replays buffered events, then streams until the Session is done.

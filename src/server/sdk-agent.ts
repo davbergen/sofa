@@ -1,4 +1,4 @@
-﻿import { query, type CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import { query, type CanUseTool, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type {
   Agent,
   AgentRunInput,
@@ -12,6 +12,11 @@ import { docWriteFromToolUse } from './doc-writes.js';
 export interface SdkAgentOptions {
   /** Cap the number of agentic turns (useful for smoke tests). */
   maxTurns?: number;
+}
+
+/** Wraps a single follow-up user message as the SDK's streaming-input shape. */
+async function* oneUserMessage(text: string): AsyncGenerator<SDKUserMessage> {
+  yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null };
 }
 
 /** Shape of the SDK's AskUserQuestion tool input (see sdk-tools.d.ts). */
@@ -30,6 +35,9 @@ interface AskUserQuestionInput {
  * - AskUserQuestion tool calls surface as `question` events; the callback
  *   blocks until `answerQuestion` supplies each answer, then allows the tool
  *   with the answers folded into its input.
+ * - A tool call named PrdDraft (the designated draft channel: the grilling
+ *   skill calls it with `{title, markdown}` whenever it has a PRD draft to
+ *   show) surfaces as a `prd_draft` event and is allowed without prompting.
  * - Every other tool call surfaces as a `permission_request` event; the
  *   callback blocks until `decidePermission` resolves it, so tool execution
  *   waits on the user's decision.
@@ -62,6 +70,12 @@ export class SdkAgent implements Agent {
         return { behavior: 'allow', updatedInput: { ...input, answers } };
       }
 
+      if (toolName === 'PrdDraft' || toolName.endsWith('__PrdDraft')) {
+        const { title, markdown } = input as { title?: string; markdown?: string };
+        out.push({ type: 'prd_draft', title: title ?? 'PRD', markdown: markdown ?? '' });
+        return { behavior: 'allow', updatedInput: input };
+      }
+
       out.push({ type: 'permission_request', requestId: toolUseID, toolName, input });
       const decision = await new Promise<PermissionDecision>((resolve) =>
         pendingDecisions.set(toolUseID, resolve),
@@ -71,21 +85,22 @@ export class SdkAgent implements Agent {
         : { behavior: 'deny', message: 'Denied by the user.' };
     };
 
+    const messages = query({
+      prompt,
+      options: {
+        cwd,
+        maxTurns: this.options.maxTurns,
+        canUseTool,
+        resume,
+        // The SDK discovers skills from the same ~/.claude setup the CLI
+        // uses (settingSources defaults to all sources); naming one here
+        // enables it and loads its frontmatter into the system prompt.
+        ...(skill ? { skills: [skill] } : {}),
+      },
+    });
+
     void (async () => {
       try {
-        const messages = query({
-          prompt,
-          options: {
-            cwd,
-            maxTurns: this.options.maxTurns,
-            canUseTool,
-            resume,
-            // The SDK discovers skills from the same ~/.claude setup the CLI
-            // uses (settingSources defaults to all sources); naming one here
-            // enables it and loads its frontmatter into the system prompt.
-            ...(skill ? { skills: [skill] } : {}),
-          },
-        });
         for await (const message of messages) {
           if (message.type === 'system' && message.subtype === 'init') {
             out.push({ type: 'agent_session', agentSessionId: message.session_id });
@@ -136,6 +151,16 @@ export class SdkAgent implements Agent {
         const resolve = pendingDecisions.get(requestId);
         pendingDecisions.delete(requestId);
         resolve?.(decision);
+      },
+      sendMessage: (text) => {
+        // The SDK's multi-turn channel: push one follow-up user message into
+        // the running query (e.g. a PRD revision request).
+        messages.streamInput(oneUserMessage(text)).catch((err: unknown) => {
+          out.push({
+            type: 'agent_error',
+            message: `sending follow-up message failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        });
       },
     };
   }

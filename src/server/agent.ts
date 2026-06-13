@@ -63,6 +63,26 @@ export interface PermissionDecisionEvent {
   decision: PermissionDecision;
 }
 
+/** The Agent produced (or revised) a PRD draft; the UI renders it as a document panel. */
+export interface PrdDraftEvent {
+  type: 'prd_draft';
+  title: string;
+  markdown: string;
+}
+
+/** A follow-up user message sent into the running Session (e.g. a PRD revision request), echoed for replay. */
+export interface UserMessageEvent {
+  type: 'user_message';
+  text: string;
+}
+
+/** The approved PRD was published to the Project's GitHub issue tracker, echoed for replay. */
+export interface PrdPublishedEvent {
+  type: 'prd_published';
+  issueNumber: number;
+  url: string;
+}
+
 /**
  * The Agent wrote or updated one of the Project's living documents
  * (CONTEXT.md or a file under docs/adr/), derived from tool-use messages.
@@ -89,6 +109,9 @@ export type AgentEvent =
   | QuestionAnswerEvent
   | PermissionRequestEvent
   | PermissionDecisionEvent
+  | PrdDraftEvent
+  | UserMessageEvent
+  | PrdPublishedEvent
   | FileWriteEvent
   | UsageEvent;
 
@@ -111,6 +134,8 @@ export interface AgentSession {
   answerQuestion(questionId: string, answer: string): void;
   /** Resolves a pending PermissionRequestEvent; the gated tool runs only on 'allow'. */
   decidePermission(requestId: string, decision: PermissionDecision): void;
+  /** Sends a follow-up user message into the running Session (conversational revision). */
+  sendMessage(text: string): void;
 }
 
 export interface Agent {

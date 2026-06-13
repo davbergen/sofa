@@ -15,6 +15,7 @@ import type {
 const github: GitHubAdapter = {
   resolveRepo: () => Promise.resolve('davbergen/scratch'),
   listReadyIssues: () => Promise.resolve([]),
+  createIssue: () => Promise.resolve({ number: 1, url: 'https://github.com/davbergen/scratch/issues/1' }),
 };
 
 /**

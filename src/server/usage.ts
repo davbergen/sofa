@@ -120,6 +120,7 @@ export function withUsageRecording(
   return {
     answerQuestion: (questionId, answer) => session.answerQuestion(questionId, answer),
     decidePermission: (requestId, decision) => session.decidePermission(requestId, decision),
+    sendMessage: (text) => session.sendMessage(text),
     events: (async function* () {
       for await (const event of session.events) {
         if (event.type === 'usage') {
