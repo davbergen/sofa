@@ -7,6 +7,9 @@ export interface FieldNoteItem {
   acted: boolean;
   action: string | null;
   sessionId: number | null;
+  /** When filed directly as an Issue (action === 'issue'): the GitHub Issue it became. */
+  issueNumber: number | null;
+  issueUrl: string | null;
 }
 
 export interface FieldNotes {
@@ -25,6 +28,22 @@ interface ItemRow {
   acted: number;
   action: string | null;
   session_id: number | null;
+  issue_number: number | null;
+  issue_url: string | null;
+}
+
+const ITEM_COLUMNS = 'id, text, acted, action, session_id, issue_number, issue_url';
+
+function toItem(row: ItemRow): FieldNoteItem {
+  return {
+    id: row.id,
+    text: row.text,
+    acted: row.acted !== 0,
+    action: row.action,
+    sessionId: row.session_id,
+    issueNumber: row.issue_number,
+    issueUrl: row.issue_url,
+  };
 }
 
 /**
@@ -68,6 +87,41 @@ export class FieldNotesStore {
    * updated Item, or null if no matching Item is found for that Project.
    */
   markActed(projectId: number, itemId: number, action: string, sessionId: number): FieldNoteItem | null {
+    if (!this.belongsToProject(projectId, itemId)) return null;
+
+    this.db
+      .prepare('UPDATE field_note_items SET acted = 1, action = ?, session_id = ? WHERE id = ?')
+      .run(action, sessionId, itemId);
+
+    return this.get(itemId);
+  }
+
+  /**
+   * Records that David cut an Item directly into a GitHub Issue (action
+   * 'issue'): no Session is spawned, so session_id stays null; instead the
+   * filed Issue's number and URL are stored. Verifies the Item belongs to the
+   * Project. Returns the updated Item, or null if no matching Item is found.
+   */
+  markActedAsIssue(
+    projectId: number,
+    itemId: number,
+    issueNumber: number,
+    issueUrl: string,
+  ): FieldNoteItem | null {
+    if (!this.belongsToProject(projectId, itemId)) return null;
+
+    this.db
+      .prepare(
+        `UPDATE field_note_items
+         SET acted = 1, action = 'issue', session_id = NULL, issue_number = ?, issue_url = ?
+         WHERE id = ?`,
+      )
+      .run(issueNumber, issueUrl, itemId);
+
+    return this.get(itemId);
+  }
+
+  private belongsToProject(projectId: number, itemId: number): boolean {
     const check = this.db
       .prepare(
         `SELECT fni.id FROM field_note_items fni
@@ -75,22 +129,14 @@ export class FieldNotesStore {
          WHERE fni.id = ? AND fn.project_id = ?`,
       )
       .get(itemId, projectId) as unknown as { id: number } | undefined;
-    if (!check) return null;
+    return !!check;
+  }
 
-    this.db
-      .prepare('UPDATE field_note_items SET acted = 1, action = ?, session_id = ? WHERE id = ?')
-      .run(action, sessionId, itemId);
-
+  private get(itemId: number): FieldNoteItem {
     const row = this.db
-      .prepare('SELECT id, text, acted, action, session_id FROM field_note_items WHERE id = ?')
+      .prepare(`SELECT ${ITEM_COLUMNS} FROM field_note_items WHERE id = ?`)
       .get(itemId) as unknown as ItemRow;
-    return {
-      id: row.id,
-      text: row.text,
-      acted: row.acted !== 0,
-      action: row.action,
-      sessionId: row.session_id,
-    };
+    return toItem(row);
   }
 
   getForProject(projectId: number): FieldNotes {
@@ -101,17 +147,11 @@ export class FieldNotesStore {
       return { hasNote: false, items: [] };
     }
     const rows = this.db
-      .prepare('SELECT id, text, acted, action, session_id FROM field_note_items WHERE note_id = ? ORDER BY position')
+      .prepare(`SELECT ${ITEM_COLUMNS} FROM field_note_items WHERE note_id = ? ORDER BY position`)
       .all(note.id) as unknown as ItemRow[];
     return {
       hasNote: true,
-      items: rows.map((row) => ({
-        id: row.id,
-        text: row.text,
-        acted: row.acted !== 0,
-        action: row.action,
-        sessionId: row.session_id,
-      })),
+      items: rows.map(toItem),
     };
   }
 }

@@ -585,6 +585,36 @@ body {
   color: var(--tx3);
 }
 
+/* Create Issue confirm/edit step — pre-filled title/body, tweak before filing */
+.cz-fn-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.cz-fn-issue-title,
+.cz-fn-issue-body {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 11px;
+  color: var(--cream);
+  font-family: inherit;
+  font-size: 13px;
+}
+.cz-fn-issue-body {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+.cz-fn-issue-title:focus,
+.cz-fn-issue-body:focus {
+  outline: none;
+  border-color: var(--seam);
+}
+
 /* empty / zero states */
 .cz-empty {
   display: flex;

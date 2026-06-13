@@ -162,9 +162,10 @@ describe('Field Notes acted status', () => {
     expect(updated).toMatchObject({ id: item.id, acted: true, action: 'grill', sessionId: session.id });
   });
 
-  // Issue #32 acceptance: acting on an Item — POST a Session with the Item's
-  // text as the prompt, then PATCH the Item with { action, sessionId } — creates
-  // a real Session and links the Item to it. Both actions, end to end.
+  // Issue #32 acceptance: Grilling an Item — POST a Session with the Item's text
+  // as the prompt, then PATCH the Item with { action, sessionId } — creates a
+  // real Session and links the Item to it. (Filing an Item directly as an Issue
+  // is the separate atomic path, covered in field-notes-issue.test.ts.)
   it('Grilling an Item creates a grill-with-docs Session and links the Item to it', async () => {
     const db = openDb(':memory:');
     const app = createApp(db, new FakeAgent());
@@ -192,28 +193,6 @@ describe('Field Notes acted status', () => {
     expect(updated).toMatchObject({ id: item.id, acted: true, action: 'grill', sessionId: session.id });
   });
 
-  it('Implementing an Item creates a Session (no skill) and links the Item to it', async () => {
-    const db = openDb(':memory:');
-    const app = createApp(db, new FakeAgent());
-    const project = await openProject(app, makeDir());
-    await dropNote(app, project.id, '1. Fix the header\n2. Align the footer');
-
-    const notes = await (await getNotes(app, project.id)).json();
-    const item = notes.items[1];
-
-    // Implementing carries the Item text verbatim but loads no skill.
-    const session = await startSession(app, project.id, item.text);
-    const res = await actItem(app, project.id, item.id, 'implement', session.id);
-    expect(res.status).toBe(200);
-
-    const persisted = await getSession(app, session.id);
-    expect(persisted.id).toBe(session.id);
-    expect(persisted.prompt).toBe(item.text);
-    expect(persisted.skill).toBeNull();
-
-    const updated = await res.json();
-    expect(updated).toMatchObject({ id: item.id, acted: true, action: 'implement', sessionId: session.id });
-  });
 
   it('rejects linking an Item to a non-existent Session via the foreign key', async () => {
     const db = openDb(':memory:');
@@ -248,10 +227,10 @@ describe('Field Notes acted status', () => {
     const notes = await (await getNotes(app, project.id)).json();
     const [first] = notes.items as Array<{ id: number; text: string }>;
     const session = await startSession(app, project.id, first.text);
-    await actItem(app, project.id, first.id, 'implement', session.id);
+    await actItem(app, project.id, first.id, 'grill', session.id);
 
     const list = await (await getNotes(app, project.id)).json();
-    expect(list.items[0]).toMatchObject({ acted: true, action: 'implement', sessionId: session.id });
+    expect(list.items[0]).toMatchObject({ acted: true, action: 'grill', sessionId: session.id });
     expect(list.items[1]).toMatchObject({ acted: false, action: null, sessionId: null });
   });
 
@@ -280,7 +259,7 @@ describe('Field Notes acted status', () => {
     const notes = await (await getNotes(app, project.id)).json();
     const item = notes.items[0];
     const session = await startSession(app, project.id, item.text);
-    await actItem(app, project.id, item.id, 'implement', session.id);
+    await actItem(app, project.id, item.id, 'grill', session.id);
 
     await dropNote(app, project.id, '1. brand new item');
     const fresh = await (await getNotes(app, project.id)).json();

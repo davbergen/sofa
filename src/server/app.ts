@@ -12,6 +12,7 @@ import { SessionStore } from './session-store.js';
 import { FieldNotesStore } from './field-notes-store.js';
 import { parseFieldNotes } from './field-notes.js';
 import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
+import { READY_LABEL } from './adapters.js';
 import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
 import { readSofaConfig, SofaConfigError } from './sofa-config.js';
 import { projectUsage, recordRunUsage, recordSessionUsage, withUsageRecording } from './usage.js';
@@ -243,9 +244,9 @@ export function createApp(
     return c.json(fieldNotes.replaceForProject(projectId, parseFieldNotes(body.text)), 201);
   });
 
-  // Mark a Field Note Item acted: record which action was taken (grill /
-  // implement) and the Session id it spawned. The Item must belong to the
-  // given Project; once acted the Item is still shown and re-triggerable.
+  // Mark a Field Note Item acted by the Grill action: record the action and the
+  // Session id it spawned. The Item must belong to the given Project. (Cutting
+  // an Item into an Issue is the separate atomic endpoint below.)
   app.patch('/api/projects/:projectId/field-notes/items/:itemId', async (c) => {
     const projectId = Number(c.req.param('projectId'));
     const itemId = Number(c.req.param('itemId'));
@@ -266,6 +267,64 @@ export function createApp(
       return c.json({ error: `no Field Note Item with id ${itemId} for Project ${projectId}` }, 404);
     }
     return c.json(item);
+  });
+
+  // Cut a self-contained Field Note Item directly into a ready Issue (#39):
+  // file it on the Project's GitHub issue tracker with the ready-for-agent label
+  // and mark the Item acted, atomically in one response. No LLM/Session is
+  // started — an Item that needs shaping should be Grilled instead. The title
+  // and body come from the browser's confirm/edit step (pre-filled from the
+  // Item) so David can tweak them before filing.
+  app.post('/api/projects/:projectId/field-notes/items/:itemId/issue', async (c) => {
+    if (!deps) {
+      return c.json({ error: 'GitHub adapter not configured' }, 500);
+    }
+    const projectId = Number(c.req.param('projectId'));
+    const itemId = Number(c.req.param('itemId'));
+    // One join verifies the Project exists, the Item belongs to it, and yields
+    // the directory to file against — so we never hit GitHub for a bad Item.
+    const row = db
+      .prepare(
+        `SELECT p.dir AS dir FROM field_note_items fni
+         JOIN field_notes fn ON fn.id = fni.note_id
+         JOIN open_projects p ON p.id = fn.project_id
+         WHERE fni.id = ? AND p.id = ?`,
+      )
+      .get(itemId, projectId) as unknown as { dir: string } | undefined;
+    if (!row) {
+      return c.json({ error: `no Field Note Item with id ${itemId} for Project ${projectId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const title = typeof body?.title === 'string' ? body.title.trim() : '';
+    const issueBody = typeof body?.body === 'string' ? body.body : '';
+    if (!title) {
+      return c.json({ error: 'title is required' }, 400);
+    }
+    try {
+      const created = await deps.github.createIssue(row.dir, {
+        title,
+        body: issueBody,
+        labels: [READY_LABEL],
+      });
+      // The join above guarantees the Item exists for this Project, so this
+      // returns the updated Item rather than null.
+      const item = fieldNotes.markActedAsIssue(projectId, itemId, created.number, created.url);
+      return c.json(item, 201);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // gh fails to create the Issue when the ready-for-agent label is missing
+      // from a fresh repo. Surface that as an actionable error rather than a raw
+      // gh dump — label creation is the convention-labels issue's job, not here.
+      if (/not found/i.test(message) && message.includes(READY_LABEL)) {
+        return c.json(
+          {
+            error: `the '${READY_LABEL}' label does not exist in this repository; create it and try again`,
+          },
+          422,
+        );
+      }
+      return c.json({ error: `filing the Issue failed: ${message}` }, 502);
+    }
   });
 
   // The persisted transcript: survives restarts, unlike the live event stream.
