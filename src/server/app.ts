@@ -788,5 +788,24 @@ export function createApp(
     return c.json(toRun(updated));
   });
 
+  // Remove a past run record. Only terminal runs may be removed — an active run
+  // must be killed first. token_usage rows keyed to the run go with it; the FK
+  // has no ON DELETE CASCADE, so they're deleted explicitly.
+  app.delete('/api/runs/:id', (c) => {
+    const runId = Number(c.req.param('id'));
+    const row = db
+      .prepare('SELECT state FROM worker_runs WHERE id = ?')
+      .get(runId) as unknown as { state: RunState } | undefined;
+    if (!row) {
+      return c.json({ error: `no run with id ${runId}` }, 404);
+    }
+    if (isActive(row.state)) {
+      return c.json({ error: `run ${runId} is active (state: ${row.state}) — kill it first` }, 409);
+    }
+    db.prepare('DELETE FROM token_usage WHERE run_id = ?').run(runId);
+    db.prepare('DELETE FROM worker_runs WHERE id = ?').run(runId);
+    return c.body(null, 204);
+  });
+
   return app;
 }
