@@ -69,7 +69,7 @@ const MIGRATIONS: string[] = [
     text TEXT NOT NULL
   )`,
   // Field Note acted status: per-Item progress David makes through the list.
-  // acted = whether the item has been acted on; action = 'grill' | 'implement';
+  // acted = whether the item has been acted on; action = 'grill' | 'issue';
   // session_id = the Session it spawned (nullable until acted).
   `ALTER TABLE field_note_items ADD COLUMN acted INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE field_note_items ADD COLUMN action TEXT;
@@ -95,6 +95,13 @@ const MIGRATIONS: string[] = [
   DROP TABLE field_note_items;
   ALTER TABLE field_note_items_new RENAME TO field_note_items;
   PRAGMA foreign_keys = ON`,
+  // Cut a self-contained Field Note Item directly into a ready Issue (#39):
+  // record the filed Issue's number and URL on the Item. Unlike session_id
+  // these carry no foreign key — the Issue lives on GitHub, not in this DB —
+  // and stay nullable (only an Item filed as an Issue has them). `action` now
+  // ranges over 'grill' | 'issue'.
+  `ALTER TABLE field_note_items ADD COLUMN issue_number INTEGER;
+  ALTER TABLE field_note_items ADD COLUMN issue_url TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {

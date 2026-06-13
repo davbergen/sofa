@@ -33,7 +33,7 @@ function exec(cmd: string, args: string[], cwd?: string): Promise<ExecResult> {
 }
 
 /** The label that marks an Issue as ready for a Worker. */
-const READY_LABEL = process.env.SOFA_READY_LABEL ?? 'ready-for-agent';
+export const READY_LABEL = process.env.SOFA_READY_LABEL ?? 'ready-for-agent';
 
 export function ghGitHubAdapter(): GitHubAdapter {
   return {

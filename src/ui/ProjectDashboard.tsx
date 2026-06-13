@@ -6,6 +6,8 @@ interface FieldNoteItem {
   acted: boolean;
   action: string | null;
   sessionId: number | null;
+  issueNumber: number | null;
+  issueUrl: string | null;
 }
 
 interface FieldNotes {
@@ -170,6 +172,9 @@ export function ProjectDashboard({
   const [notes, setNotes] = useState<FieldNotes | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  // The Item currently in the "Create Issue" confirm/edit step, with its
+  // editable title/body pre-filled from the Item. Null when no Item is being filed.
+  const [filing, setFiling] = useState<{ id: number; title: string; body: string } | null>(null);
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -271,23 +276,46 @@ export function ProjectDashboard({
     await refreshRuns();
   }
 
-  async function actOnItem(item: FieldNoteItem, action: 'grill' | 'implement') {
+  async function refreshNotes() {
+    const res = await fetch(`/api/projects/${projectId}/field-notes`);
+    if (res.ok) setNotes(await res.json());
+  }
+
+  // Grill an unclear Item: escalate it into a grill-with-docs Grilling Session
+  // and link the Item to the spawned Session.
+  async function grillItem(item: FieldNoteItem) {
     if (!onStartSession) return;
     setNotesError(null);
-    const skill = action === 'grill' ? 'grill-with-docs' : undefined;
     let sessionId: number;
     try {
-      sessionId = await onStartSession(item.text, skill);
+      sessionId = await onStartSession(item.text, 'grill-with-docs');
     } catch {
       return;
     }
     await fetch(`/api/projects/${projectId}/field-notes/items/${item.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, sessionId }),
+      body: JSON.stringify({ action: 'grill', sessionId }),
     });
-    const res = await fetch(`/api/projects/${projectId}/field-notes`);
-    if (res.ok) setNotes(await res.json());
+    await refreshNotes();
+  }
+
+  // Confirm the "Create Issue" step: file the Item as a ready Issue and mark it
+  // acted, in one atomic request. The Item then shows its terminal "Filed" state.
+  async function fileIssue(itemId: number, title: string, issueBody: string) {
+    setNotesError(null);
+    const res = await fetch(`/api/projects/${projectId}/field-notes/items/${itemId}/issue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body: issueBody }),
+    });
+    if (res.ok) {
+      setFiling(null);
+      await refreshNotes();
+    } else {
+      const body = await res.json().catch(() => null);
+      setNotesError(body?.error ?? `filing the Issue failed (${res.status})`);
+    }
   }
 
   const total = usage?.total;
@@ -335,12 +363,24 @@ export function ProjectDashboard({
                   <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
                     {item.text}
                   </div>
+                  {/* Acted is terminal: show what the Item became and hide its
+                      actions, so it can't be Grilled or filed twice. */}
                   {item.acted && (
                     <div className="cz-fn-meta">
                       <span className="cz-fn-tag">
-                        {item.action === 'grill' ? 'Grilled' : 'Implemented'}
+                        {item.action === 'issue' ? 'Filed' : 'Grilled'}
                       </span>
-                      {item.sessionId && onViewSession && (
+                      {item.action === 'issue' && item.issueUrl && (
+                        <a
+                          className="cz-fn-sess"
+                          href={item.issueUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Issue #{item.issueNumber}
+                        </a>
+                      )}
+                      {item.action !== 'issue' && item.sessionId && onViewSession && (
                         <button
                           type="button"
                           className="cz-fn-sess"
@@ -349,28 +389,73 @@ export function ProjectDashboard({
                           Session #{item.sessionId}
                         </button>
                       )}
-                      {item.sessionId && !onViewSession && (
+                      {item.action !== 'issue' && item.sessionId && !onViewSession && (
                         <span className="cz-fn-sess-label">Session #{item.sessionId}</span>
                       )}
                     </div>
                   )}
-                  {onStartSession && (
-                    <div className="cz-fn-acts">
-                      <button
-                        type="button"
-                        className="cz-disp"
-                        onClick={() => void actOnItem(item, 'grill')}
-                      >
-                        Grill
-                      </button>
-                      <button
-                        type="button"
-                        className="cz-disp"
-                        onClick={() => void actOnItem(item, 'implement')}
-                      >
-                        Implement directly
-                      </button>
+                  {!item.acted && filing?.id === item.id ? (
+                    // Create Issue confirm/edit step: pre-filled from the Item,
+                    // editable before filing. No LLM call — just a tweak-and-file.
+                    <div className="cz-fn-issue">
+                      <input
+                        className="cz-fn-issue-title"
+                        aria-label="Issue title"
+                        value={filing.title}
+                        onChange={(e) => setFiling({ ...filing, title: e.target.value })}
+                      />
+                      <textarea
+                        className="cz-fn-issue-body"
+                        aria-label="Issue body"
+                        rows={4}
+                        value={filing.body}
+                        onChange={(e) => setFiling({ ...filing, body: e.target.value })}
+                      />
+                      <div className="cz-fn-acts">
+                        <button
+                          type="button"
+                          className="cz-disp"
+                          disabled={!filing.title.trim()}
+                          onClick={() => void fileIssue(filing.id, filing.title, filing.body)}
+                        >
+                          File Issue
+                        </button>
+                        <button
+                          type="button"
+                          className="cz-disp"
+                          onClick={() => setFiling(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
+                  ) : (
+                    !item.acted && (
+                      <div className="cz-fn-acts">
+                        {onStartSession && (
+                          <button
+                            type="button"
+                            className="cz-disp"
+                            onClick={() => void grillItem(item)}
+                          >
+                            Grill
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="cz-disp"
+                          onClick={() =>
+                            setFiling({
+                              id: item.id,
+                              title: item.text.split('\n')[0],
+                              body: item.text,
+                            })
+                          }
+                        >
+                          Create Issue
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
               ))}
