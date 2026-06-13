@@ -80,6 +80,9 @@ const RUN_COLUMNS =
 /** Label applied to every published PRD on the Project's GitHub issue tracker. */
 export const PRD_LABEL = 'prd';
 
+/** Label applied to every approved Issue so the Ralph Loop can pick it up. */
+export const READY_LABEL = 'ready-for-agent';
+
 export function createApp(
   db: DatabaseSync,
   agent: Agent,
@@ -338,6 +341,54 @@ export function createApp(
         502,
       );
     }
+  });
+
+  // Approve the Session's current Issue breakdown: create the Issues on the
+  // Project's GitHub issue tracker, labeled ready-for-agent, in dependency
+  // order. Nothing reaches GitHub before this explicit action.
+  app.post('/api/sessions/:sessionId/issues/approve', async (c) => {
+    if (!deps) {
+      return c.json({ error: 'GitHub adapter not configured' }, 500);
+    }
+    const sessionId = Number(c.req.param('sessionId'));
+    const run = sessions.get(sessionId);
+    if (!run) {
+      return c.json({ error: `no running Session with id ${sessionId}` }, 404);
+    }
+    const breakdown = run.issueBreakdown();
+    if (!breakdown) {
+      return c.json({ error: 'the Session has no Issue breakdown to approve' }, 409);
+    }
+    const project = db
+      .prepare(
+        'SELECT p.dir AS dir FROM sessions s JOIN open_projects p ON p.id = s.project_id WHERE s.id = ?',
+      )
+      .get(sessionId) as unknown as { dir: string } | undefined;
+    if (!project) {
+      return c.json({ error: `no Project for Session ${sessionId}` }, 404);
+    }
+    const created: Array<{ number: number; url: string }> = [];
+    try {
+      // One call per Issue, sequentially, so they land in dependency order.
+      for (const issue of breakdown.issues) {
+        created.push(
+          await deps.github.createIssue(project.dir, {
+            title: issue.title,
+            body: issue.body,
+            labels: [READY_LABEL],
+          }),
+        );
+      }
+    } catch (err) {
+      return c.json(
+        {
+          error: `creating the Issues failed after ${created.length} of ${breakdown.issues.length}: ${err instanceof Error ? err.message : String(err)}`,
+        },
+        502,
+      );
+    }
+    run.push({ type: 'issues_published', issues: created });
+    return c.json({ issues: created }, 201);
   });
 
   // Live transcript: replays buffered events, then streams until the Session is done.

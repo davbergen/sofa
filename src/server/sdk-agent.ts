@@ -38,6 +38,10 @@ interface AskUserQuestionInput {
  * - A tool call named PrdDraft (the designated draft channel: the grilling
  *   skill calls it with `{title, markdown}` whenever it has a PRD draft to
  *   show) surfaces as a `prd_draft` event and is allowed without prompting.
+ * - A tool call named IssueBreakdown (the designated breakdown channel: the
+ *   breakdown skill calls it with `{issues: [{title, body}, …]}` in dependency
+ *   order whenever it has a proposed breakdown to show) surfaces as an
+ *   `issue_breakdown` event and is allowed without prompting.
  * - Every other tool call surfaces as a `permission_request` event; the
  *   callback blocks until `decidePermission` resolves it, so tool execution
  *   waits on the user's decision.
@@ -73,6 +77,18 @@ export class SdkAgent implements Agent {
       if (toolName === 'PrdDraft' || toolName.endsWith('__PrdDraft')) {
         const { title, markdown } = input as { title?: string; markdown?: string };
         out.push({ type: 'prd_draft', title: title ?? 'PRD', markdown: markdown ?? '' });
+        return { behavior: 'allow', updatedInput: input };
+      }
+
+      if (toolName === 'IssueBreakdown' || toolName.endsWith('__IssueBreakdown')) {
+        const { issues } = input as { issues?: Array<{ title?: string; body?: string }> };
+        out.push({
+          type: 'issue_breakdown',
+          issues: (issues ?? []).map((issue) => ({
+            title: issue.title ?? 'Untitled Issue',
+            body: issue.body ?? '',
+          })),
+        });
         return { behavior: 'allow', updatedInput: input };
       }
 
