@@ -340,6 +340,7 @@ export function App() {
   const [prdDraft, setPrdDraft] = useState<PrdDraft | null>(null);
   const [prdPublished, setPrdPublished] = useState<PrdPublication | null>(null);
   const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null);
+  const [composerText, setComposerText] = useState('');
   const sourceRef = useRef<EventSource | null>(null);
   const sessionSectionRef = useRef<HTMLElement | null>(null);
   // Dashboards are expanded by default; this tracks the ones the user collapsed.
@@ -423,6 +424,20 @@ export function App() {
       setError(body?.error ?? `sending the revision failed (${res.status})`);
     }
     // The updated prd_draft event coming back over SSE re-renders the panel.
+  }
+
+  async function sendSessionMessage(sessionId: number, text: string) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `sending message failed (${res.status})`);
+    }
+    // The user_message event coming back over SSE echoes it into the transcript.
   }
 
   async function approvePrd(sessionId: number) {
@@ -724,6 +739,39 @@ export function App() {
                     onDecide={(decision) => void decidePermission(session.id, interaction.requestId, decision)}
                   />
                 ),
+              )}
+              {status === 'streaming' && pending.length === 0 && (
+                <form
+                  className="cz-composer"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const text = composerText.trim();
+                    if (!text) return;
+                    void sendSessionMessage(session.id, text);
+                    setComposerText('');
+                  }}
+                >
+                  <textarea
+                    aria-label="Message"
+                    className="cz-field"
+                    rows={2}
+                    placeholder="Reply to the agent…"
+                    value={composerText}
+                    onChange={(e) => setComposerText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        const text = composerText.trim();
+                        if (!text) return;
+                        void sendSessionMessage(session.id, text);
+                        setComposerText('');
+                      }
+                    }}
+                  />
+                  <button type="submit" className="cz-btn tan" disabled={!composerText.trim()}>
+                    Send
+                  </button>
+                </form>
               )}
             </div>
             {prdDraft && (
