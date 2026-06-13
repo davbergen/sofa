@@ -324,6 +324,16 @@ export function ProjectDashboard({
     await refreshRuns();
   }
 
+  async function removeRun(runId: number) {
+    setKillError(null);
+    const res = await fetch(`/api/runs/${runId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setKillError(body?.error ?? `remove failed (${res.status})`);
+    }
+    await refreshRuns();
+  }
+
   async function refreshNotes() {
     const res = await fetch(`/api/projects/${projectId}/field-notes`);
     if (res.ok) setNotes(await res.json());
@@ -623,9 +633,17 @@ export function ProjectDashboard({
                     <span className="id">#{run.issue}</span>
                     <span className="nm">{run.issueTitle}</span>
                     <span className={`state ${tone}`}>{STATE_LABELS[run.state]}</span>
-                    {ACTIVE.includes(run.state) && (
+                    {ACTIVE.includes(run.state) ? (
                       <button className="cz-kill" onClick={() => void killRun(run.id)}>
                         Kill
+                      </button>
+                    ) : (
+                      <button
+                        className="cz-kill"
+                        aria-label={`Remove run for issue #${run.issue}`}
+                        onClick={() => void removeRun(run.id)}
+                      >
+                        Remove
                       </button>
                     )}
                   </div>
