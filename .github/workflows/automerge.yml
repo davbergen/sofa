@@ -24,6 +24,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write
     steps:
       # Check out the live base branch (master at job-run time), not the PR's
       # precomputed merge ref, so a PR that merged while we were queued is
