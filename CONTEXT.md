@@ -49,3 +49,19 @@ Sofa's dispatch cycle: launch a Worker while ready Issues exist and main is
 clean, wait for the resulting PR to be reviewed and merged, repeat. The loop
 lives in Sofa, not in the Worker.
 _Avoid_: work loop, autopilot
+
+**Field Notes**:
+A plain-text note David drags into Sofa while testing a Project, listing
+changes he wants made. Unstructured raw input that *feeds* the pipeline,
+upstream of the Grilling Session — the entry ramp to the workflow. Sofa
+persists the parsed note and David's progress through it as operational state,
+so he can act on one Item, leave, and return to the next. It is never tracked
+work and never lives in GitHub (cf. ADR 0002).
+_Avoid_: backlog, todo list, spec, PRD
+
+**Field Note Item**:
+A single actionable change parsed out of Field Notes. David acts on one Item
+at a time, either escalating it into a Grilling Session or implementing it
+directly; the Item then carries an acted status and a link to the Session it
+spawned, so returning later shows what is left to do.
+_Avoid_: issue (an Item is not yet tracked work), task

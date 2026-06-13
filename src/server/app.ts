@@ -9,6 +9,8 @@ import { SessionRegistry } from './sessions.js';
 import { fsSkillSource, type SkillSource } from './skills.js';
 import { ActivityRegistry } from './activity.js';
 import { SessionStore } from './session-store.js';
+import { FieldNotesStore } from './field-notes-store.js';
+import { parseFieldNotes } from './field-notes.js';
 import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
 import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
 import { readSofaConfig, SofaConfigError } from './sofa-config.js';
@@ -95,6 +97,7 @@ export function createApp(
   // Live grips on this process's Worker containers, for the kill switch.
   const workerHandles = new Map<number, WorkerHandle>();
   const store = new SessionStore(db);
+  const fieldNotes = new FieldNotesStore(db);
 
   /**
    * Runs one Agent turn for a Session, persisting events as they stream.
@@ -199,6 +202,38 @@ export function createApp(
       return c.json({ error: `no open Project with id ${projectId}` }, 404);
     }
     return c.json(store.listByProject(projectId));
+  });
+
+  // Field Notes read path: David drops a plain-text note onto a Project; the
+  // browser sends its text, the server parses it into Items and persists them
+  // (replacing any prior note). The matching GET serves them back so the list
+  // survives a restart and shows up in a different browser.
+  app.get('/api/projects/:projectId/field-notes', (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const project = db
+      .prepare('SELECT id FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+    return c.json(fieldNotes.getForProject(projectId));
+  });
+
+  app.post('/api/projects/:projectId/field-notes', async (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const project = db
+      .prepare('SELECT id FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    // An empty note is a valid drop (it just yields no Items); only a missing
+    // or non-string `text` is a malformed request.
+    if (typeof body?.text !== 'string') {
+      return c.json({ error: 'text is required' }, 400);
+    }
+    return c.json(fieldNotes.replaceForProject(projectId, parseFieldNotes(body.text)), 201);
   });
 
   // The persisted transcript: survives restarts, unlike the live event stream.

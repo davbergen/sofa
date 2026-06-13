@@ -54,6 +54,20 @@ const MIGRATIONS: string[] = [
   )`,
   // The skill (from ~/.claude) loaded into the Session, if any.
   `ALTER TABLE sessions ADD COLUMN skill TEXT`,
+  // Field Notes: David's pre-pipeline notes, parsed into Items and persisted as
+  // operational state per Project (ADR 0004). One note per Project (UNIQUE);
+  // dropping a new file replaces it.
+  `CREATE TABLE field_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL UNIQUE REFERENCES open_projects(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE field_note_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id INTEGER NOT NULL REFERENCES field_notes(id),
+    position INTEGER NOT NULL,
+    text TEXT NOT NULL
+  )`,
 ];
 
 export function openDb(path: string): DatabaseSync {

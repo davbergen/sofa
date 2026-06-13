@@ -452,6 +452,23 @@ body {
   cursor: not-allowed;
 }
 
+/* ---- Field Notes drop target + parsed Items --------------------------- */
+.cz-drop {
+  border: 2px dashed var(--seam);
+  border-radius: 14px;
+  padding: 8px 10px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.cz-drop.over {
+  border-color: var(--sage);
+  background: rgba(163, 173, 140, 0.08);
+}
+.cz-fn {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 /* empty / zero states */
 .cz-empty {
   display: flex;

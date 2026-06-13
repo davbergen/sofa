@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type DragEvent } from 'react';
+
+interface FieldNoteItem {
+  id: number;
+  text: string;
+}
+
+interface FieldNotes {
+  hasNote: boolean;
+  items: FieldNoteItem[];
+}
 
 interface ReadyIssue {
   number: number;
@@ -129,6 +139,15 @@ function ArrowIcon() {
   );
 }
 
+function NoteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </svg>
+  );
+}
+
 /** The factory floor for one Project: ready Issues, Dispatch, run records, usage. */
 export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [issues, setIssues] = useState<ReadyIssue[] | null>(null);
@@ -137,6 +156,9 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [usage, setUsage] = useState<ProjectUsage | null>(null);
   const [killError, setKillError] = useState<string | null>(null);
+  const [notes, setNotes] = useState<FieldNotes | null>(null);
+  const [notesError, setNotesError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -166,6 +188,42 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
       cancelled = true;
     };
   }, [projectId]);
+
+  // Load any persisted Field Notes for this Project (they survive restarts and
+  // show up in a fresh browser).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/projects/${projectId}/field-notes`);
+      if (cancelled || !res.ok) return;
+      setNotes(await res.json());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // Drop a `.txt` note onto the dashboard: read its text in the browser, send it
+  // to Sofa, and show the parsed Items (replacing any prior note).
+  async function onDropNote(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragging(false);
+    setNotesError(null);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const text = await file.text();
+    const res = await fetch(`/api/projects/${projectId}/field-notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (res.ok) {
+      setNotes(await res.json());
+    } else {
+      const body = await res.json().catch(() => null);
+      setNotesError(body?.error ?? `reading the note failed (${res.status})`);
+    }
+  }
 
   // Poll while any Worker is active so lifecycle states update live.
   const anyActive = runs.some((r) => ACTIVE.includes(r.state));
@@ -210,6 +268,50 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
 
   return (
     <div className="cz-grid">
+      {/* Field Notes — the pre-pipeline entry ramp; full width across the grid. */}
+      <section className="cz-cush cz-card" style={{ gridColumn: '1 / -1' }} aria-label="Field Notes">
+        <div className="cz-card-h">
+          <span className="ic sage">
+            <NoteIcon />
+          </span>
+          <span className="ti">Field Notes</span>
+          <span className="tag">drag a .txt</span>
+        </div>
+        {notesError && <p role="alert" className="cz-alert">{notesError}</p>}
+        <div
+          aria-label="Field Notes drop target"
+          className={`cz-drop${dragging ? ' over' : ''}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => void onDropNote(e)}
+        >
+          {!notes || !notes.hasNote ? (
+            <div className="cz-empty">
+              <div className="t">Drop a .txt note here</div>
+              <div className="s">capture the changes you jotted while testing</div>
+            </div>
+          ) : notes.items.length === 0 ? (
+            <div className="cz-empty">
+              <div className="t">No items in that note</div>
+              <div className="s">drop another .txt with numbered lines</div>
+            </div>
+          ) : (
+            <div className="cz-fn">
+              {notes.items.map((item) => (
+                <div className="cz-issue" key={item.id}>
+                  <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
+                    {item.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Ready Issues — tall */}
       <section className="cz-cush cz-card tall" aria-label="Ready Issues">
         <div className="cz-card-h">
