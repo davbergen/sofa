@@ -175,6 +175,34 @@ export function ProjectDashboard({
   // The Item currently in the "Create Issue" confirm/edit step, with its
   // editable title/body pre-filled from the Item. Null when no Item is being filed.
   const [filing, setFiling] = useState<{ id: number; title: string; body: string } | null>(null);
+  const [workerModel, setWorkerModel] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch(`/api/projects/${projectId}/settings`);
+      if (res.ok) {
+        const data = await res.json() as { workerModel: string | null };
+        setWorkerModel(data.workerModel);
+      }
+    })();
+  }, [projectId]);
+
+  async function saveWorkerModel(value: string | null) {
+    setSettingsError(null);
+    const res = await fetch(`/api/projects/${projectId}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workerModel: value }),
+    });
+    if (res.ok) {
+      const data = await res.json() as { workerModel: string | null };
+      setWorkerModel(data.workerModel);
+    } else {
+      const body = await res.json().catch(() => null);
+      setSettingsError((body as { error?: string } | null)?.error ?? `save failed (${res.status})`);
+    }
+  }
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -461,6 +489,32 @@ export function ProjectDashboard({
               ))}
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Worker Settings */}
+      <section className="cz-cush cz-card" aria-label="Worker Settings">
+        <div className="cz-card-h">
+          <span className="ic tan">
+            <GearIcon />
+          </span>
+          <span className="ti">Worker Settings</span>
+        </div>
+        {settingsError && <p role="alert" className="cz-alert">{settingsError}</p>}
+        <div className="cz-setting-row">
+          <label className="cz-setting-label" htmlFor={`worker-model-${projectId}`}>Worker model</label>
+          <select
+            id={`worker-model-${projectId}`}
+            className="cz-select"
+            value={workerModel ?? ''}
+            onChange={(e) => void saveWorkerModel(e.target.value || null)}
+          >
+            <option value="">Default</option>
+            <option value="opus">opus</option>
+            <option value="sonnet">sonnet</option>
+            <option value="haiku">haiku</option>
+            <option value="fable">fable</option>
+          </select>
         </div>
       </section>
 

@@ -527,6 +527,38 @@ export function createApp(
     return c.json(projectUsage(db, project.id));
   });
 
+  const CURATED_MODELS = new Set(['opus', 'sonnet', 'haiku', 'fable']);
+
+  app.get('/api/projects/:id/settings', (c) => {
+    const project = getProject(c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'no such Project' }, 404);
+    }
+    const row = db
+      .prepare('SELECT worker_model FROM open_projects WHERE id = ?')
+      .get(project.id) as unknown as { worker_model: string | null } | undefined;
+    return c.json({ workerModel: row?.worker_model ?? null });
+  });
+
+  app.post('/api/projects/:id/settings', async (c) => {
+    const project = getProject(c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'no such Project' }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const raw = body?.workerModel;
+    // null / omitted / "Default" all map to NULL (no override).
+    const workerModel = raw === null || raw === undefined || raw === 'Default' ? null : String(raw).trim() || null;
+    if (workerModel !== null && !CURATED_MODELS.has(workerModel)) {
+      return c.json(
+        { error: `workerModel must be one of ${[...CURATED_MODELS].join(', ')} or null` },
+        422,
+      );
+    }
+    db.prepare('UPDATE open_projects SET worker_model = ? WHERE id = ?').run(workerModel, project.id);
+    return c.json({ workerModel });
+  });
+
   app.get('/api/projects/:id/runs', (c) => {
     const project = getProject(c.req.param('id'));
     if (!project) {
@@ -598,6 +630,11 @@ export function createApp(
       return c.json({ error: `resolving repository failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
     }
 
+    const projectRow = db
+      .prepare('SELECT worker_model FROM open_projects WHERE id = ?')
+      .get(project.id) as unknown as { worker_model: string | null } | undefined;
+    const workerModel = projectRow?.worker_model ?? null;
+
     const { lastInsertRowid } = db
       .prepare("INSERT INTO worker_runs (project_id, issue_number, issue_title, state) VALUES (?, ?, ?, 'cloning')")
       .run(project.id, issue, issueTitle);
@@ -605,7 +642,12 @@ export function createApp(
 
     const feed = activity.start(runId);
     const handle = deps.container.startWorker(
-      { repo, issue, ...(workerImage ? { image: workerImage } : {}) },
+      {
+        repo,
+        issue,
+        ...(workerImage ? { image: workerImage } : {}),
+        ...(workerModel ? { model: workerModel } : {}),
+      },
       (event) => {
       // Mirror every event onto the run's live activity feed.
       switch (event.type) {

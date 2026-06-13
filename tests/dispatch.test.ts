@@ -253,6 +253,83 @@ describe('Worker image override (sofa.json)', () => {
   });
 });
 
+describe('Worker model selection', () => {
+  it('launches with the model from settings when one is configured', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+    await h.app.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workerModel: 'haiku' }),
+    });
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches).toEqual([{ repo: 'davbergen/scratch', issue: 7, model: 'haiku' }]);
+  });
+
+  it('launches with no model override when the setting is Default (null)', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches[0].model).toBeUndefined();
+  });
+
+  it('reads and writes settings through the server', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+
+    const initial = await h.app.request(`/api/projects/${project.id}/settings`);
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toEqual({ workerModel: null });
+
+    await h.app.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workerModel: 'opus' }),
+    });
+
+    const after = await h.app.request(`/api/projects/${project.id}/settings`);
+    expect(await after.json()).toEqual({ workerModel: 'opus' });
+  });
+
+  it('rejects a model outside the curated alias set and stores nothing', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+
+    const res = await h.app.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workerModel: 'claude-opus-4-7-20251101' }),
+    });
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain('workerModel');
+    const check = await h.app.request(`/api/projects/${project.id}/settings`);
+    expect((await check.json()).workerModel).toBeNull();
+  });
+
+  it('persists the worker model across a server restart', async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'sofa-settings-db-')), 'sofa.db');
+    const first = makeHarness(openDb(dbPath));
+    const { project } = await openProject(first.app);
+    await first.app.request(`/api/projects/${project.id}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workerModel: 'sonnet' }),
+    });
+    first.db.close();
+
+    const second = makeHarness(openDb(dbPath));
+    const res = await second.app.request(`/api/projects/${project.id}/settings`);
+    expect(await res.json()).toEqual({ workerModel: 'sonnet' });
+  });
+});
+
 describe('run lifecycle', () => {
   it('tracks each lifecycle state as the Worker progresses to an open PR', async () => {
     const h = makeHarness();

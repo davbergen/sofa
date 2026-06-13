@@ -102,6 +102,10 @@ const MIGRATIONS: string[] = [
   // ranges over 'grill' | 'issue'.
   `ALTER TABLE field_note_items ADD COLUMN issue_number INTEGER;
   ALTER TABLE field_note_items ADD COLUMN issue_url TEXT`,
+  // Per-Project Worker model selection (ADR 0005): operational preference, stored
+  // in Sofa's own store, never written to the Project's sofa.json. NULL = Default
+  // (no model override). Curated aliases only: opus, sonnet, haiku, fable.
+  `ALTER TABLE open_projects ADD COLUMN worker_model TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {
