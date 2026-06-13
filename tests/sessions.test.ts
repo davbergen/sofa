@@ -323,6 +323,54 @@ describe('multi-turn conversation', () => {
   });
 });
 
+async function endSession(
+  app: ReturnType<typeof makeApp>,
+  sessionId: number,
+): Promise<Response> {
+  return app.request(`/api/sessions/${sessionId}/end`, { method: 'POST' });
+}
+
+describe('ending a Session', () => {
+  it('ends a live (hanging) session and marks it done', async () => {
+    const agent = new FakeAgent([], { hang: true });
+    const app = makeApp(agent);
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Stay alive')).json();
+
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+
+    const res = await endSession(app, session.id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    // The stream should close cleanly after the session ends.
+    await sse.until('done');
+
+    // The session is persisted as done.
+    const stored = await (await app.request(`/api/sessions/${session.id}/transcript`)).json();
+    expect(stored.session.status).toBe('done');
+  });
+
+  it('ending a session after it finishes is idempotent', async () => {
+    const app = makeApp(fakeAgentSaying('Hi.'));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Say hi')).json();
+
+    // Wait for the session to finish naturally.
+    await readSse(app, session.id);
+
+    const res = await endSession(app, session.id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('returns 404 for an unknown session', async () => {
+    const app = makeApp();
+    const res = await endSession(app, 99999);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('turn-boundary events', () => {
   it('emits turn_boundary after each scripted turn', async () => {
     const app = makeApp(

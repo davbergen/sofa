@@ -44,6 +44,8 @@ export class FakeAgent implements Agent {
   private readonly resolvers = new Map<string, (value: string) => void>();
   private readonly messageWaiters: Array<() => void> = [];
   private undeliveredMessages = 0;
+  private closed = false;
+  private readonly closeWaiters: Array<() => void> = [];
 
   constructor(
     private readonly script: FakeAgentStep[] = [{ type: 'assistant_text', text: 'Hello from the fake Agent.' }],
@@ -71,6 +73,11 @@ export class FakeAgent implements Agent {
           this.undeliveredMessages++;
         }
       },
+      close: () => {
+        this.closed = true;
+        for (const w of this.closeWaiters) w();
+        this.closeWaiters.length = 0;
+      },
     };
   }
 
@@ -84,7 +91,9 @@ export class FakeAgent implements Agent {
     }
     yield* this.emit(this.script);
     if (this.options.hang) {
-      await new Promise(() => {}); // interrupted: never finishes
+      if (!this.closed) {
+        await new Promise<void>((resolve) => this.closeWaiters.push(resolve));
+      }
     }
   }
 
