@@ -14,9 +14,38 @@ export interface SdkAgentOptions {
   maxTurns?: number;
 }
 
-/** Wraps a single follow-up user message as the SDK's streaming-input shape. */
-async function* oneUserMessage(text: string): AsyncGenerator<SDKUserMessage> {
-  yield { type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null };
+/**
+ * A long-lived input queue for the SDK's streaming-input mode. Pass one to
+ * `query({ prompt: queue })` so the Session stays open across turns; call
+ * `send(text)` to push each follow-up user message without closing the channel.
+ * (Contrast: `streamInput(oneUserMessage(...))` closes the channel after one
+ * message, ending the Session — hence the switch to this queue.)
+ */
+class MessageQueue implements AsyncIterable<SDKUserMessage> {
+  private readonly pending: SDKUserMessage[] = [];
+  private waiter: (() => void) | null = null;
+
+  send(text: string): void {
+    this.pending.push({
+      type: 'user',
+      message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+    });
+    this.waiter?.();
+    this.waiter = null;
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
+    while (true) {
+      if (this.pending.length > 0) {
+        yield this.pending.shift()!;
+      } else {
+        await new Promise<void>((resolve) => {
+          this.waiter = resolve;
+        });
+      }
+    }
+  }
 }
 
 /** Shape of the SDK's AskUserQuestion tool input (see sdk-tools.d.ts). */
@@ -52,6 +81,13 @@ export class SdkAgent implements Agent {
     const pendingAnswers = new Map<string, (answer: string) => void>();
     const pendingDecisions = new Map<string, (decision: PermissionDecision) => void>();
 
+    // Start the Session in streaming-input mode: the prompt becomes the first
+    // message in a long-lived queue so the SDK keeps the input channel open
+    // across turns. Follow-up messages go through this same queue, not through
+    // streamInput(), which closes the channel after one message.
+    const inputQueue = new MessageQueue();
+    inputQueue.send(prompt);
+
     const canUseTool: CanUseTool = async (toolName, input, { toolUseID }) => {
       if (toolName === 'AskUserQuestion') {
         const { questions } = input as unknown as AskUserQuestionInput;
@@ -86,7 +122,7 @@ export class SdkAgent implements Agent {
     };
 
     const messages = query({
-      prompt,
+      prompt: inputQueue,
       options: {
         cwd,
         maxTurns: this.options.maxTurns,
@@ -153,14 +189,7 @@ export class SdkAgent implements Agent {
         resolve?.(decision);
       },
       sendMessage: (text) => {
-        // The SDK's multi-turn channel: push one follow-up user message into
-        // the running query (e.g. a PRD revision request).
-        messages.streamInput(oneUserMessage(text)).catch((err: unknown) => {
-          out.push({
-            type: 'agent_error',
-            message: `sending follow-up message failed: ${err instanceof Error ? err.message : String(err)}`,
-          });
-        });
+        inputQueue.send(text);
       },
     };
   }

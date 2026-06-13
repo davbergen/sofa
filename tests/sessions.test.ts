@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openDb } from '../src/server/db';
 import { createApp } from '../src/server/app';
 import type { Agent } from '../src/server/agent';
-import { FakeAgent, fakeAgentSaying } from '../src/server/fake-agent';
+import { FakeAgent, fakeAgentSaying, type FakeAgentStep } from '../src/server/fake-agent';
 import { docWriteFromToolUse } from '../src/server/doc-writes';
 
 function makeApp(agent: Agent = new FakeAgent()) {
@@ -217,5 +217,108 @@ describe('surfacing doc writes', () => {
     expect(docWriteFromToolUse('Write', { file_path: '/proj/src/index.ts' })).toBeNull();
     expect(docWriteFromToolUse('Read', { file_path: '/proj/CONTEXT.md' })).toBeNull();
     expect(docWriteFromToolUse('Write', {})).toBeNull();
+  });
+});
+
+/** Incremental SSE reader that works with a paused (not-yet-finished) Agent. */
+function openSse(res: Response) {
+  expect(res.status).toBe(200);
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const queue: Array<{ event: string; data: string }> = [];
+
+  async function next(): Promise<{ event: string; data: string }> {
+    for (;;) {
+      const ready = queue.shift();
+      if (ready) return ready;
+      const { done, value } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: true });
+      let split;
+      while ((split = buffer.indexOf('\n\n')) >= 0) {
+        const chunk = buffer.slice(0, split);
+        buffer = buffer.slice(split + 2);
+        if (!chunk.trim()) continue;
+        const lines = chunk.split('\n');
+        queue.push({
+          event: lines.find((l) => l.startsWith('event:'))?.slice('event:'.length).trim() ?? '',
+          data: lines.find((l) => l.startsWith('data:'))?.slice('data:'.length).trim() ?? '',
+        });
+      }
+      if (done && queue.length === 0) throw new Error('SSE stream ended unexpectedly');
+    }
+  }
+
+  async function until(eventType: string): Promise<{ event: string; data: string }> {
+    for (;;) {
+      const event = await next();
+      if (event.event === eventType) return event;
+    }
+  }
+
+  return { until };
+}
+
+async function postMessage(
+  app: ReturnType<typeof makeApp>,
+  sessionId: number,
+  text: string,
+): Promise<Response> {
+  return app.request(`/api/sessions/${sessionId}/message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+}
+
+describe('multi-turn conversation', () => {
+  it('delivers a follow-up message and streams both turns in the transcript', async () => {
+    const script: FakeAgentStep[] = [
+      { type: 'assistant_text', text: 'Turn 1 response.' },
+      { type: 'await_message' },
+      { type: 'assistant_text', text: 'Turn 2 response.' },
+    ];
+    const app = makeApp(new FakeAgent(script));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Start')).json();
+
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+
+    // Wait for the first turn response, then send a follow-up.
+    await sse.until('assistant_text');
+    const res = await postMessage(app, session.id, 'Continue please.');
+    expect(res.status).toBe(200);
+
+    // The follow-up is echoed as a user_message event, then the second turn arrives.
+    const userMsg = await sse.until('user_message');
+    expect(JSON.parse(userMsg.data).text).toBe('Continue please.');
+    const turn2 = await sse.until('assistant_text');
+    expect(JSON.parse(turn2.data).text).toBe('Turn 2 response.');
+    await sse.until('done');
+  });
+
+  it('supports more than one follow-up in sequence', async () => {
+    const script: FakeAgentStep[] = [
+      { type: 'assistant_text', text: 'First.' },
+      { type: 'await_message' },
+      { type: 'assistant_text', text: 'Second.' },
+      { type: 'await_message' },
+      { type: 'assistant_text', text: 'Third.' },
+    ];
+    const app = makeApp(new FakeAgent(script));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Go')).json();
+
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+
+    await sse.until('assistant_text');
+    await postMessage(app, session.id, 'Reply 1');
+    await sse.until('user_message');
+    await sse.until('assistant_text');
+    await postMessage(app, session.id, 'Reply 2');
+    await sse.until('user_message');
+    const last = await sse.until('assistant_text');
+    expect(JSON.parse(last.data).text).toBe('Third.');
+    await sse.until('done');
   });
 });
