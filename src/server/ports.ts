@@ -75,6 +75,8 @@ export interface StartWorkerOptions {
    * omitted the adapter launches its generic default image.
    */
   image?: string;
+  /** Claude model alias (opus/sonnet/haiku/fable) from the Project's stored setting. */
+  model?: string;
 }
 
 /** A grip on one launched Worker container, used for the kill switch. */

@@ -103,6 +103,61 @@ export function redactToken(text: string, token: string): string {
   return token ? text.split(token).join('***') : text;
 }
 
+/**
+ * Pulls the token usage out of the Claude CLI's `--output-format json` result.
+ * Best-effort: unparseable output means usage stays unknown.
+ */
+export function parseAgentUsage(stdout: string): AgentUsage | undefined {
+  try {
+    const result = JSON.parse(stdout.trim()) as {
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
+    };
+    if (typeof result !== 'object' || result === null || typeof result.usage !== 'object' || result.usage === null) {
+      return undefined;
+    }
+    const count = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.floor(x) : 0);
+    return {
+      inputTokens: count(result.usage.input_tokens),
+      outputTokens: count(result.usage.output_tokens),
+      cacheReadTokens: count(result.usage.cache_read_input_tokens),
+      cacheCreationTokens: count(result.usage.cache_creation_input_tokens),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Creates an Agent that invokes the Claude CLI non-interactively. The argv
+ * construction is the unit-testable seam: inject a fake runner and assert on
+ * which flags appear, including `--model` when a model alias is given.
+ */
+export function makeClaudeAgent(
+  runner: CommandRunner,
+  model?: string,
+  log?: (text: string) => void,
+): Agent {
+  return {
+    async implementIssue({ cwd, prompt }) {
+      const args = ['-p', prompt, '--permission-mode', 'bypassPermissions', '--output-format', 'json'];
+      if (model) {
+        args.push('--model', model);
+      }
+      const result = await runner.run('claude', args, { cwd });
+      log?.(result.stdout + result.stderr);
+      if (result.code !== 0) {
+        throw new Error(`claude exited ${result.code}: ${(result.stderr || result.stdout).trim().slice(0, 500)}`);
+      }
+      return parseAgentUsage(result.stdout);
+    },
+  };
+}
+
 function fail(reason: string, token: string): WorkerFailure {
   return { outcome: 'failed', reason: redactToken(reason, token) };
 }

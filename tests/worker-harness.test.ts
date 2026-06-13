@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  makeClaudeAgent,
   parseWorkerEnv,
   redactToken,
   runWorker,
@@ -213,6 +214,32 @@ describe('runWorker', () => {
     const result = (await outcome) as WorkerFailure;
     expect(result.reason).not.toContain(TOKEN);
     expect(result.reason).toContain('***');
+  });
+});
+
+describe('makeClaudeAgent', () => {
+  it('appends --model to the claude call when a model alias is given', async () => {
+    const { runner, calls } = makeRunner([[/^claude/, ok('{}')]]);
+    const agent = makeClaudeAgent(runner, 'haiku');
+    await agent.implementIssue({ cwd: '/work', prompt: 'do the thing' });
+
+    expect(calls[0]).toContain('--model haiku');
+  });
+
+  it('omits --model when no model is given', async () => {
+    const { runner, calls } = makeRunner([[/^claude/, ok('{}')]]);
+    const agent = makeClaudeAgent(runner);
+    await agent.implementIssue({ cwd: '/work', prompt: 'do the thing' });
+
+    expect(calls[0]).not.toContain('--model');
+  });
+
+  it('throws when claude exits non-zero', async () => {
+    const { runner } = makeRunner([[/^claude/, failWith('quota exhausted', 1)]]);
+    const agent = makeClaudeAgent(runner);
+    await expect(agent.implementIssue({ cwd: '/work', prompt: 'do the thing' })).rejects.toThrow(
+      'claude exited 1',
+    );
   });
 });
 
