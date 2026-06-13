@@ -442,6 +442,18 @@ export function createApp(
     return c.json({ ok: true });
   });
 
+  // Explicitly end a live interactive Session by closing its input queue, which
+  // completes the Agent query and marks the Session done. Idempotent: safe to
+  // call on a Session that is already finished.
+  app.post('/api/sessions/:sessionId/end', (c) => {
+    const sessionId = Number(c.req.param('sessionId'));
+    if (!store.get(sessionId)) {
+      return c.json({ error: `no Session with id ${sessionId}` }, 404);
+    }
+    sessions.agent(sessionId)?.close();
+    return c.json({ ok: true });
+  });
+
   // Approve the Session's current PRD draft: publish it to the Project's
   // GitHub issue tracker. Nothing reaches GitHub before this explicit action.
   app.post('/api/sessions/:sessionId/prd/approve', async (c) => {

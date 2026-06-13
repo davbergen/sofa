@@ -445,6 +445,15 @@ export function App() {
     // The user_message event coming back over SSE echoes it into the transcript.
   }
 
+  async function endSession(sessionId: number) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `ending Session failed (${res.status})`);
+    }
+  }
+
   async function approvePrd(sessionId: number) {
     setError(null);
     const res = await fetch(`/api/sessions/${sessionId}/prd/approve`, { method: 'POST' });
@@ -722,6 +731,15 @@ export function App() {
             <span className="cz-muted">({status === 'streaming' ? 'thinking…' : status === 'awaiting' ? 'awaiting…' : status})</span>
           </h2>
           <p className="lede">{session.prompt}</p>
+          {(status === 'streaming' || status === 'awaiting') && (
+            <button
+              type="button"
+              className="cz-btn"
+              onClick={() => void endSession(session.id)}
+            >
+              End session
+            </button>
+          )}
           <div className="cz-split">
             <div className="main">
               <div className="cz-cush cz-transcript">

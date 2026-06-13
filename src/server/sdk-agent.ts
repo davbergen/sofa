@@ -24,6 +24,7 @@ export interface SdkAgentOptions {
 class MessageQueue implements AsyncIterable<SDKUserMessage> {
   private readonly pending: SDKUserMessage[] = [];
   private waiter: (() => void) | null = null;
+  private closed = false;
 
   send(text: string): void {
     this.pending.push({
@@ -35,8 +36,14 @@ class MessageQueue implements AsyncIterable<SDKUserMessage> {
     this.waiter = null;
   }
 
+  close(): void {
+    this.closed = true;
+    this.waiter?.();
+    this.waiter = null;
+  }
+
   async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
+    while (!this.closed) {
       if (this.pending.length > 0) {
         yield this.pending.shift()!;
       } else {
@@ -192,6 +199,9 @@ export class SdkAgent implements Agent {
       },
       sendMessage: (text) => {
         inputQueue.send(text);
+      },
+      close: () => {
+        inputQueue.close();
       },
     };
   }

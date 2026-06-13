@@ -142,6 +142,8 @@ export interface AgentSession {
   decidePermission(requestId: string, decision: PermissionDecision): void;
   /** Sends a follow-up user message into the running Session (conversational revision). */
   sendMessage(text: string): void;
+  /** Closes the input queue, completing the Agent query and finishing the Session. Idempotent. */
+  close(): void;
 }
 
 export interface Agent {
