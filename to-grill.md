@@ -2,11 +2,11 @@
 
 Run `grill-with-docs` on each of these — they carry unresolved design that needs a session before they can become issues.
 
-## Browse button to select a Project directory
+## ✅ Browse button to select a Project directory — DONE
 
 > 1. need a button for selecting the project in file explorer
 
-**Unresolved:** A browser UI cannot obtain a native host filesystem path. How does the "Browse" button get an absolute directory path to the local server — a server-side directory-browser endpoint, or a native folder-picker bridge? This bumps the browser↔host boundary and is ADR-worthy.
+**Resolved** (grilled 2026-06-13). Server-side directory browser (the server already has host fs access; the browser sandbox is the wall). No ADR — the fs boundary already exists and is exercised; the feature only widens the read surface from path-validation to enumeration. Issues: davbergen/sofa#70 (bind server to 127.0.0.1) → davbergen/sofa#71 (Browse button + `GET /api/fs/list` picker).
 
 ## Quick "Start a new Session" entry point that initiates grilling
 
