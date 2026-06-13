@@ -52,18 +52,38 @@ export interface SessionRunHooks {
   onEvent?: (event: AgentEvent) => void;
   /** Called once the run completes; `errored` is true if anything went wrong. */
   onFinish?: (errored: boolean) => void;
+  /** Auto-end the session after this many ms of no agent output or user messages. */
+  idleTimeoutMs?: number;
 }
 
 /** In-memory registry of running (and finished) Session transcripts. */
 export class SessionRegistry {
   private readonly runs = new Map<number, SessionRun>();
   private readonly agents = new Map<number, AgentSession>();
+  private readonly idleTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  private readonly idleSchedulers = new Map<number, () => void>();
 
   /** Starts pumping the Agent session's events into a new SessionRun. */
   start(sessionId: number, agentSession: AgentSession, hooks: SessionRunHooks = {}): SessionRun {
     const run = new SessionRun();
     this.runs.set(sessionId, run);
     this.agents.set(sessionId, agentSession);
+
+    if (hooks.idleTimeoutMs != null) {
+      const timeoutMs = hooks.idleTimeoutMs;
+      const schedule = () => {
+        const existing = this.idleTimers.get(sessionId);
+        if (existing != null) clearTimeout(existing);
+        const timer = setTimeout(() => {
+          this.idleTimers.delete(sessionId);
+          this.agents.get(sessionId)?.close();
+        }, timeoutMs);
+        this.idleTimers.set(sessionId, timer);
+      };
+      this.idleSchedulers.set(sessionId, schedule);
+      schedule();
+    }
+
     void (async () => {
       let errored = false;
       try {
@@ -71,6 +91,7 @@ export class SessionRegistry {
           if (event.type === 'agent_error') errored = true;
           run.push(event);
           hooks.onEvent?.(event);
+          this.idleSchedulers.get(sessionId)?.();
         }
       } catch (err) {
         errored = true;
@@ -81,6 +102,12 @@ export class SessionRegistry {
         run.push(event);
         hooks.onEvent?.(event);
       } finally {
+        this.idleSchedulers.delete(sessionId);
+        const timer = this.idleTimers.get(sessionId);
+        if (timer != null) {
+          clearTimeout(timer);
+          this.idleTimers.delete(sessionId);
+        }
         run.finish();
         hooks.onFinish?.(errored);
       }
@@ -95,5 +122,10 @@ export class SessionRegistry {
   /** The Agent-side handle for routing answers and permission decisions into a running Session. */
   agent(sessionId: number): AgentSession | undefined {
     return this.agents.get(sessionId);
+  }
+
+  /** Resets the idle timer for a session (call when a user message arrives). */
+  heartbeat(sessionId: number): void {
+    this.idleSchedulers.get(sessionId)?.();
   }
 }

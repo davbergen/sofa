@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,10 @@ import { docWriteFromToolUse } from '../src/server/doc-writes';
 
 function makeApp(agent: Agent = new FakeAgent()) {
   return createApp(openDb(':memory:'), agent);
+}
+
+function makeAppWithTimeout(sessionIdleTimeoutMs: number, agent: Agent = new FakeAgent()) {
+  return createApp(openDb(':memory:'), agent, undefined, undefined, { sessionIdleTimeoutMs });
 }
 
 function makeDir() {
@@ -368,6 +372,89 @@ describe('ending a Session', () => {
     const app = makeApp();
     const res = await endSession(app, 99999);
     expect(res.status).toBe(404);
+  });
+});
+
+describe('idle-timeout', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('auto-ends an idle session after the timeout fires', async () => {
+    const app = makeAppWithTimeout(1000, new FakeAgent([], { hang: true }));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Stay alive')).json();
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await sse.until('done');
+    const stored = await (await app.request(`/api/sessions/${session.id}/transcript`)).json();
+    expect(stored.session.status).toBe('done');
+  });
+
+  it('resets the timeout on agent output', async () => {
+    const app = makeAppWithTimeout(
+      1000,
+      new FakeAgent([{ type: 'assistant_text', text: 'Hi.' }], { hang: true }),
+    );
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Go')).json();
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+
+    // Let setImmediate fire so the FakeAgent emits its event, resetting the timer.
+    await vi.advanceTimersByTimeAsync(0);
+    await sse.until('assistant_text');
+
+    // At 999ms from the event (just before the reset timeout would fire): still alive.
+    await vi.advanceTimersByTimeAsync(999);
+    const mid = await (await app.request(`/api/sessions/${session.id}/transcript`)).json();
+    expect(mid.session.status).toBe('running');
+
+    // Now let the reset timeout fire.
+    await vi.advanceTimersByTimeAsync(1);
+    await sse.until('done');
+  });
+
+  it('resets the timeout on user message', async () => {
+    const app = makeAppWithTimeout(
+      1000,
+      new FakeAgent([{ type: 'await_message' }], { hang: true }),
+    );
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Go')).json();
+    openSse(await app.request(`/api/sessions/${session.id}/events`));
+
+    // Advance 500ms (half the timeout), then send a user message to reset the timer.
+    await vi.advanceTimersByTimeAsync(500);
+    await app.request(`/api/sessions/${session.id}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'still here' }),
+    });
+
+    // At 999ms from the message (just under the reset window): still alive.
+    await vi.advanceTimersByTimeAsync(999);
+    const mid = await (await app.request(`/api/sessions/${session.id}/transcript`)).json();
+    expect(mid.session.status).toBe('running');
+
+    // Now the reset timeout fires.
+    await vi.advanceTimersByTimeAsync(1);
+    const sse2 = openSse(await app.request(`/api/sessions/${session.id}/events`));
+    await sse2.until('done');
+  });
+
+  it('does not fire if the session ends naturally before the timeout', async () => {
+    const app = makeAppWithTimeout(1000, fakeAgentSaying('Hello.'));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Say hi')).json();
+
+    // Let the agent finish naturally (setImmediate + event loop).
+    await vi.advanceTimersByTimeAsync(0);
+
+    const events = await readSse(app, session.id);
+    expect(events.some((e) => e.event === 'done')).toBe(true);
+    const stored = await (await app.request(`/api/sessions/${session.id}/transcript`)).json();
+    expect(stored.session.status).toBe('done');
   });
 });
 
