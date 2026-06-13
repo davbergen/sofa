@@ -326,9 +326,156 @@ function ProjectCard({
   );
 }
 
+interface FsEntry {
+  name: string;
+  path: string;
+}
+
+interface FsListing {
+  current: string;
+  parent: string | null;
+  entries: FsEntry[];
+}
+
+/** The synthetic Windows drive-list pseudo-root (mirrors the server constant). */
+const DRIVE_LIST_ROOT = ':drives:';
+
+/** Clickable ancestor crumbs for a path, newest last. */
+function crumbsOf(current: string): { label: string; path: string }[] {
+  if (current === DRIVE_LIST_ROOT) return [{ label: 'Drives', path: DRIVE_LIST_ROOT }];
+  const parts = current.split(/[\\/]+/).filter(Boolean);
+  const crumbs: { label: string; path: string }[] = [];
+  if (current.includes('\\')) {
+    // Windows: first part is the drive (e.g. "C:"); offer the drive list above it.
+    crumbs.push({ label: 'Drives', path: DRIVE_LIST_ROOT });
+    let acc = '';
+    parts.forEach((part, i) => {
+      acc = i === 0 ? `${part}\\` : `${acc.replace(/\\$/, '')}\\${part}`;
+      crumbs.push({ label: part, path: acc });
+    });
+  } else {
+    crumbs.push({ label: '/', path: '/' });
+    let acc = '';
+    for (const part of parts) {
+      acc += `/${part}`;
+      crumbs.push({ label: part, path: acc });
+    }
+  }
+  return crumbs;
+}
+
+/**
+ * The Browse picker: a breadcrumb + single-list directory browser served by the
+ * host (one `fs/list` call per navigation step). "Select this folder" writes the
+ * current absolute path back into the open-Project field; the actual open still
+ * flows through the unchanged POST /api/projects.
+ */
+function DirectoryPicker({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (path: string) => void;
+  onClose: () => void;
+}) {
+  const [listing, setListing] = useState<FsListing | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function navigate(path?: string) {
+    setError(null);
+    const url = path === undefined ? '/api/fs/list' : `/api/fs/list?path=${encodeURIComponent(path)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `failed to list directory (${res.status})`);
+      return;
+    }
+    setListing(await res.json());
+  }
+
+  useEffect(() => {
+    void navigate();
+  }, []);
+
+  return (
+    <div className="cz-picker-backdrop" role="dialog" aria-label="Browse for a Project directory" onClick={onClose}>
+      <div className="cz-cush cz-picker" onClick={(e) => e.stopPropagation()}>
+        <div className="cz-picker-bar">
+          <button
+            type="button"
+            className="cz-tab"
+            disabled={!listing || listing.parent === null}
+            onClick={() => void navigate(listing?.parent ?? undefined)}
+          >
+            ↑ Up
+          </button>
+          <div className="cz-crumbs mono">
+            {listing &&
+              crumbsOf(listing.current).map((crumb, i, all) => (
+                <span key={crumb.path}>
+                  <button
+                    type="button"
+                    className="cz-crumb"
+                    disabled={i === all.length - 1}
+                    onClick={() => void navigate(crumb.path)}
+                  >
+                    {crumb.label}
+                  </button>
+                  {i < all.length - 1 && <span className="sep"> › </span>}
+                </span>
+              ))}
+          </div>
+        </div>
+
+        {error && (
+          <p role="alert" className="cz-alert">
+            {error}
+          </p>
+        )}
+
+        <ul className="cz-picker-list">
+          {listing?.entries.length === 0 ? (
+            <li className="cz-muted empty">No subdirectories here.</li>
+          ) : (
+            listing?.entries.map((entry) => (
+              <li key={entry.path}>
+                <button type="button" className="cz-picker-row mono" onClick={() => void navigate(entry.path)}>
+                  <span className="ic" aria-hidden="true">
+                    🗀
+                  </span>
+                  {entry.name}
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+
+        <div className="cz-actions">
+          <button type="button" className="cz-btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="cz-btn tan"
+            disabled={!listing || listing.current === DRIVE_LIST_ROOT}
+            onClick={() => {
+              if (listing) {
+                onSelect(listing.current);
+                onClose();
+              }
+            }}
+          >
+            Select this folder
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dir, setDir] = useState('');
+  const [browsing, setBrowsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [prompts, setPrompts] = useState<Record<number, string>>({});
   const [skillByProject, setSkillByProject] = useState<Record<number, string>>({});
@@ -652,10 +799,19 @@ export function App() {
           value={dir}
           onChange={(e) => setDir(e.target.value)}
         />
+        <button type="button" className="cz-btn" onClick={() => setBrowsing(true)}>
+          Browse…
+        </button>
         <button type="submit" className="cz-btn tan" disabled={!dir.trim()}>
           Open Project
         </button>
       </form>
+      {browsing && (
+        <DirectoryPicker
+          onSelect={(path) => setDir(path)}
+          onClose={() => setBrowsing(false)}
+        />
+      )}
       {error && (
         <p role="alert" className="cz-alert">
           {error}
