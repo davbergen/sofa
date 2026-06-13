@@ -77,17 +77,25 @@ export interface AppDeps {
   container: ContainerAdapter;
 }
 
+export interface AppOptions {
+  /** Auto-end an idle interactive Session after this many ms of no activity. Default: 30 min. */
+  sessionIdleTimeoutMs?: number;
+}
+
 const RUN_COLUMNS =
   'id, project_id, issue_number, issue_title, state, pr_url, failure_reason, started_at';
 
 /** Label applied to every published PRD on the Project's GitHub issue tracker. */
 export const PRD_LABEL = 'prd';
 
+const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 export function createApp(
   db: DatabaseSync,
   agent: Agent,
   deps?: AppDeps,
   skills?: SkillSource,
+  options?: AppOptions,
 ): Hono {
   const app = new Hono();
   // Any handler that throws (e.g. a SQL error from a schema mismatch) returns a
@@ -119,6 +127,7 @@ export function createApp(
     sessions.start(sessionId, agentSession, {
       onEvent: (event) => store.appendEvent(sessionId, event),
       onFinish: (errored) => store.setStatus(sessionId, errored ? 'error' : 'done'),
+      idleTimeoutMs: options?.sessionIdleTimeoutMs ?? DEFAULT_SESSION_IDLE_TIMEOUT_MS,
     });
   }
 
@@ -439,6 +448,7 @@ export function createApp(
     }
     agentSession.sendMessage(text);
     run.push({ type: 'user_message', text });
+    sessions.heartbeat(sessionId);
     return c.json({ ok: true });
   });
 
