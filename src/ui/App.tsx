@@ -80,6 +80,17 @@ type PendingInteraction =
 
 const OTHER = '__other__';
 
+/** The Sofa sofa logo — used in the brand header and per-Project avatars. */
+function SofaMark({ size = 32, stroke = '#2a1d0f' }: { size?: number; stroke?: string }) {
+  return (
+    <svg viewBox="0 0 32 24" width={size} height={size} fill="none" stroke={stroke} strokeWidth="1.7" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M5 13c0-2 1-3 3-3h16c2 0 3 1 3 3v4H5z" />
+      <path d="M7.5 10V7.5C7.5 6 8.5 5 10 5h12c1.5 0 2.5 1 2.5 2.5V10" />
+      <path d="M5 17v3M27 17v3M11 13v1M16 13v1M21 13v1" />
+    </svg>
+  );
+}
+
 function QuestionForm({
   pending,
   onSubmit,
@@ -98,16 +109,10 @@ function QuestionForm({
   }
 
   return (
-    <form
-      aria-label={`Question: ${pending.question}`}
-      onSubmit={submit}
-      style={{ border: '1px solid #ccc', borderRadius: 6, padding: '1rem', margin: '0.5rem 0' }}
-    >
-      <p style={{ marginTop: 0 }}>
-        <strong>{pending.question}</strong>
-      </p>
+    <form aria-label={`Question: ${pending.question}`} onSubmit={submit} className="cz-cush cz-form">
+      <p className="q">{pending.question}</p>
       {pending.options.map((option) => (
-        <label key={option.label} style={{ display: 'block', marginBottom: '0.25rem' }}>
+        <label key={option.label}>
           <input
             type="radio"
             name={`question-${pending.questionId}`}
@@ -119,7 +124,7 @@ function QuestionForm({
           {option.description && <small> — {option.description}</small>}
         </label>
       ))}
-      <label style={{ display: 'block', marginBottom: '0.5rem' }}>
+      <label>
         <input
           type="radio"
           name={`question-${pending.questionId}`}
@@ -129,14 +134,17 @@ function QuestionForm({
         Other:{' '}
         <input
           aria-label="Other answer"
+          className="cz-input"
           value={other}
           onChange={(e) => setOther(e.target.value)}
           onFocus={() => setChoice(OTHER)}
         />
       </label>
-      <button type="submit" disabled={!answer}>
-        Answer
-      </button>
+      <div className="cz-actions">
+        <button type="submit" className="cz-btn tan" disabled={!answer}>
+          Answer
+        </button>
+      </div>
     </form>
   );
 }
@@ -149,24 +157,18 @@ function PermissionPrompt({
   onDecide: (decision: 'allow' | 'deny') => void;
 }) {
   return (
-    <div
-      role="group"
-      aria-label={`Permission request: ${pending.toolName}`}
-      style={{ border: '1px solid #e0a800', borderRadius: 6, padding: '1rem', margin: '0.5rem 0' }}
-    >
-      <p style={{ marginTop: 0 }}>
-        <strong>The Agent wants to run {pending.toolName}.</strong>
-      </p>
-      {pending.description && <p>{pending.description}</p>}
-      <pre style={{ background: '#f6f6f6', padding: '0.5rem', overflowX: 'auto' }}>
-        {JSON.stringify(pending.input, null, 2)}
-      </pre>
-      <button type="button" onClick={() => onDecide('allow')}>
-        Approve
-      </button>{' '}
-      <button type="button" onClick={() => onDecide('deny')}>
-        Deny
-      </button>
+    <div role="group" aria-label={`Permission request: ${pending.toolName}`} className="cz-cush cz-perm">
+      <p className="q">The Agent wants to run {pending.toolName}.</p>
+      {pending.description && <p className="cz-muted">{pending.description}</p>}
+      <pre>{JSON.stringify(pending.input, null, 2)}</pre>
+      <div className="cz-actions">
+        <button type="button" className="cz-btn tan" onClick={() => onDecide('allow')}>
+          Approve
+        </button>
+        <button type="button" className="cz-btn" onClick={() => onDecide('deny')}>
+          Deny
+        </button>
+      </div>
     </div>
   );
 }
@@ -198,35 +200,11 @@ function PrdPanel({
   }
 
   return (
-    <aside
-      aria-label={`PRD draft: ${draft.title}`}
-      style={{
-        flex: 1,
-        minWidth: 0,
-        border: '1px solid #ccc',
-        borderRadius: 6,
-        padding: '1rem',
-        alignSelf: 'flex-start',
-      }}
-    >
-      <h3 style={{ marginTop: 0 }}>{draft.title}</h3>
-      <div
-        style={{
-          background: '#fff',
-          border: '1px solid #eee',
-          borderRadius: 4,
-          padding: '0.75rem',
-          whiteSpace: 'pre-wrap',
-          fontFamily: 'ui-monospace, monospace',
-          fontSize: '0.85rem',
-          maxHeight: '24rem',
-          overflowY: 'auto',
-        }}
-      >
-        {draft.markdown}
-      </div>
+    <aside aria-label={`PRD draft: ${draft.title}`} className="cz-cush cz-prd">
+      <h3>{draft.title}</h3>
+      <div className="doc">{draft.markdown}</div>
       {published ? (
-        <p>
+        <p className="pub">
           Published as issue #{published.issueNumber}:{' '}
           <a href={published.url} target="_blank" rel="noreferrer">
             {published.url}
@@ -234,24 +212,107 @@ function PrdPanel({
         </p>
       ) : (
         <>
-          <form onSubmit={submitRevision} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+          <form onSubmit={submitRevision} className="cz-revise">
             <input
               aria-label="Revision request"
+              className="cz-input"
               placeholder="Ask for a revision…"
               value={revision}
               onChange={(e) => setRevision(e.target.value)}
-              style={{ flex: 1, padding: '0.5rem' }}
             />
-            <button type="submit" disabled={!revision.trim()}>
+            <button type="submit" className="cz-btn" disabled={!revision.trim()}>
               Revise
             </button>
           </form>
-          <button type="button" onClick={onApprove} style={{ marginTop: '0.75rem' }}>
-            Approve and publish to GitHub
-          </button>
+          <div className="cz-actions">
+            <button type="button" className="cz-btn tan" onClick={onApprove}>
+              Approve and publish to GitHub
+            </button>
+          </div>
         </>
       )}
     </aside>
+  );
+}
+
+/**
+ * One open Project's self-contained block: its header, its own dispatch bar
+ * (prompt + skill + Start Session), and its dashboard grid (expanded by
+ * default, collapsible). Per-Project state keeps dispatch unambiguous when
+ * several Projects are open.
+ */
+function ProjectCard({
+  project,
+  skills,
+  prompt,
+  skill,
+  dashboardOpen,
+  onPromptChange,
+  onSkillChange,
+  onToggleDashboard,
+  onStart,
+  onLoadSessions,
+}: {
+  project: Project;
+  skills: Skill[];
+  prompt: string;
+  skill: string;
+  dashboardOpen: boolean;
+  onPromptChange: (value: string) => void;
+  onSkillChange: (value: string) => void;
+  onToggleDashboard: () => void;
+  onStart: () => void;
+  onLoadSessions: () => void;
+}) {
+  return (
+    <div className="cz-project">
+      <div className="cz-projhead">
+        <div className="av">
+          <SofaMark size={24} stroke="currentColor" />
+        </div>
+        <div>
+          <div className="nm">{project.name}</div>
+          <div className="pa mono">{project.dir}</div>
+        </div>
+        <div className="acts">
+          <button type="button" className="cz-tab" onClick={onLoadSessions}>
+            Past Sessions
+          </button>
+          <button type="button" className="cz-tab" onClick={onToggleDashboard}>
+            {dashboardOpen ? 'Hide dashboard' : 'Show dashboard'}
+          </button>
+        </div>
+      </div>
+
+      <div className="cz-cush cz-dispatch">
+        <input
+          aria-label="Session prompt"
+          className="cz-prompt"
+          placeholder="What should the Session do?"
+          value={prompt}
+          onChange={(e) => onPromptChange(e.target.value)}
+        />
+        <label className="cz-skill">
+          <span className="k">Skill</span>
+          <select aria-label="Session skill" value={skill} onChange={(e) => onSkillChange(e.target.value)}>
+            <option value="">(no skill)</option>
+            {skills.map((s) => (
+              <option key={s.name} value={s.name} title={s.description}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="cz-btn tan" disabled={!prompt.trim()} onClick={onStart}>
+          Start Session
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 3l14 9-14 9z" />
+          </svg>
+        </button>
+      </div>
+
+      {dashboardOpen && <ProjectDashboard projectId={project.id} />}
+    </div>
   );
 }
 
@@ -259,9 +320,9 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dir, setDir] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState('');
+  const [prompts, setPrompts] = useState<Record<number, string>>({});
+  const [skillByProject, setSkillByProject] = useState<Record<number, string>>({});
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [skill, setSkill] = useState('');
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [pending, setPending] = useState<PendingInteraction[]>([]);
@@ -270,7 +331,10 @@ export function App() {
   const [prdPublished, setPrdPublished] = useState<PrdPublication | null>(null);
   const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
-  const [openId, setOpenId] = useState<number | null>(null);
+  // Dashboards are expanded by default; this tracks the ones the user collapsed.
+  const [hiddenDashboards, setHiddenDashboards] = useState<Record<number, boolean>>({});
+
+  const promptFor = (id: number) => prompts[id] ?? '';
 
   async function refresh() {
     const res = await fetch('/api/projects');
@@ -348,6 +412,8 @@ export function App() {
 
   async function startSession(project: Project) {
     setError(null);
+    const prompt = promptFor(project.id);
+    const skill = skillByProject[project.id] ?? '';
     const res = await fetch(`/api/projects/${project.id}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -365,7 +431,7 @@ export function App() {
     setStatus('streaming');
     setPrdDraft(null);
     setPrdPublished(null);
-    setPrompt('');
+    setPrompts((prev) => ({ ...prev, [project.id]: '' }));
     attachStream(started.id);
   }
 
@@ -459,6 +525,7 @@ export function App() {
   /** Resumes an interrupted Session (e.g. after a Sofa restart). */
   async function resumeSession(past: PastSession, projectName: string) {
     setError(null);
+    const prompt = promptFor(past.projectId);
     const res = await fetch(`/api/sessions/${past.id}/resume`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -474,99 +541,90 @@ export function App() {
     setSession({ id: past.id, projectName, prompt });
     setTranscript(events.map(toEntry));
     setStatus('streaming');
-    setPrompt('');
+    setPrompts((prev) => ({ ...prev, [past.projectId]: '' }));
     attachStream(past.id);
   }
 
   return (
-    <main
-      style={{
-        fontFamily: 'system-ui, sans-serif',
-        maxWidth: prdDraft ? 1100 : 640,
-        margin: '2rem auto',
-      }}
-    >
-      <h1>Sofa</h1>
-      <form onSubmit={openProject} style={{ display: 'flex', gap: '0.5rem' }}>
+    <div className={`cz-app${prdDraft ? ' wide' : ''}`}>
+      <header className="cz-top">
+        <div className="cz-brand">
+          <div className="cz-logo">
+            <SofaMark size={32} />
+          </div>
+          <div>
+            <h1 className="cz-word">Sofa</h1>
+            <div className="cz-sub">your software factory — put your feet up while the workers run</div>
+          </div>
+        </div>
+        <div className="cz-stamp">Workshop · v1</div>
+      </header>
+
+      <form onSubmit={openProject} className="cz-open">
         <input
           aria-label="Project directory"
-          placeholder="C:\path\to\project"
+          className="cz-field"
+          placeholder="▸ C:\path\to\project"
           value={dir}
           onChange={(e) => setDir(e.target.value)}
-          style={{ flex: 1, padding: '0.5rem' }}
         />
-        <button type="submit" disabled={!dir.trim()}>
+        <button type="submit" className="cz-btn tan" disabled={!dir.trim()}>
           Open Project
         </button>
       </form>
-      {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
-      <h2>Open Projects</h2>
-      {projects.length === 0 ? (
-        <p>No Projects open yet.</p>
-      ) : (
-        <>
-          <input
-            aria-label="Session prompt"
-            placeholder="What should the Session do?"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            style={{ width: '100%', padding: '0.5rem', boxSizing: 'border-box' }}
-          />
-          {skills.length > 0 && (
-            <label style={{ display: 'block', margin: '0.5rem 0' }}>
-              Skill:{' '}
-              <select
-                aria-label="Session skill"
-                value={skill}
-                onChange={(e) => setSkill(e.target.value)}
-              >
-                <option value="">(no skill)</option>
-                {skills.map((s) => (
-                  <option key={s.name} value={s.name} title={s.description}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <ul>
-            {projects.map((p) => (
-              <li key={p.id} style={{ marginBottom: '0.25rem' }}>
-                <strong>{p.name}</strong> — <code>{p.dir}</code>{' '}
-                <button type="button" disabled={!prompt.trim()} onClick={() => void startSession(p)}>
-                  Start Session
-                </button>{' '}
-                <button type="button" onClick={() => void loadSessions(p)}>
-                  Past Sessions
-                </button>{' '}
-                <button type="button" onClick={() => setOpenId(openId === p.id ? null : p.id)}>
-                  {openId === p.id ? 'Hide dashboard' : 'Show dashboard'}
-                </button>
-                {openId === p.id && <ProjectDashboard projectId={p.id} />}
-              </li>
-            ))}
-          </ul>
-        </>
+      {error && (
+        <p role="alert" className="cz-alert">
+          {error}
+        </p>
       )}
+
+      <div className="cz-h">
+        <span className="t">Open Projects</span>
+        <span className="d" />
+        <span className="c mono">{projects.length} active</span>
+      </div>
+      {projects.length === 0 ? (
+        <p className="cz-muted">No Projects open yet.</p>
+      ) : (
+        projects.map((p) => (
+          <ProjectCard
+            key={p.id}
+            project={p}
+            skills={skills}
+            prompt={promptFor(p.id)}
+            skill={skillByProject[p.id] ?? ''}
+            dashboardOpen={!hiddenDashboards[p.id]}
+            onPromptChange={(value) => setPrompts((prev) => ({ ...prev, [p.id]: value }))}
+            onSkillChange={(value) => setSkillByProject((prev) => ({ ...prev, [p.id]: value }))}
+            onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+            onStart={() => void startSession(p)}
+            onLoadSessions={() => void loadSessions(p)}
+          />
+        ))
+      )}
+
       {pastSessions && (
-        <section aria-label="Past Sessions">
+        <section aria-label="Past Sessions" className="cz-section">
           <h2>Past Sessions</h2>
           {pastSessions.length === 0 ? (
-            <p>No Sessions yet for this Project.</p>
+            <p className="cz-muted">No Sessions yet for this Project.</p>
           ) : (
-            <ul>
+            <ul className="cz-sessions">
               {pastSessions.map((s) => {
                 const projectName = projects.find((p) => p.id === s.projectId)?.name ?? `Project ${s.projectId}`;
                 return (
-                  <li key={s.id} style={{ marginBottom: '0.25rem' }}>
-                    Session #{s.id} — <em>{s.prompt}</em> <small>({s.status})</small>{' '}
-                    <button type="button" onClick={() => void viewTranscript(s, projectName)}>
+                  <li key={s.id}>
+                    <span className="pr">
+                      Session #{s.id} — <em>{s.prompt}</em> <span className="st">{s.status}</span>
+                    </span>
+                    <button type="button" className="cz-tab" onClick={() => void viewTranscript(s, projectName)}>
                       View transcript
-                    </button>{' '}
+                    </button>
                     {s.status === 'running' && s.agentSessionId && (
                       <button
                         type="button"
-                        disabled={!prompt.trim()}
+                        className="cz-tab"
+                        disabled={!promptFor(s.projectId).trim()}
                         onClick={() => void resumeSession(s, projectName)}
                       >
                         Resume
@@ -579,42 +637,22 @@ export function App() {
           )}
         </section>
       )}
+
       {session && (
-        <section aria-label="Session transcript">
+        <section aria-label="Session transcript" className="cz-section">
           <h2>
             Session #{session.id} — {session.projectName}{' '}
-            <small>({status === 'streaming' ? 'streaming…' : status})</small>
+            <span className="cz-muted">({status === 'streaming' ? 'streaming…' : status})</span>
           </h2>
-          <p>
-            <em>{session.prompt}</em>
-          </p>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'stretch' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ background: '#f6f6f6', padding: '1rem', borderRadius: 6 }}>
+          <p className="lede">{session.prompt}</p>
+          <div className="cz-split">
+            <div className="main">
+              <div className="cz-cush cz-transcript">
                 {transcript.length === 0 && pending.length === 0 && status === 'streaming' ? (
-                  <p>Waiting for the Agent…</p>
+                  <p className="wait">Waiting for the Agent…</p>
                 ) : (
                   transcript.map((entry, i) => (
-                    <p
-                      key={i}
-                      style={
-                        entry.kind === 'error'
-                          ? { color: 'crimson' }
-                          : entry.kind === 'resolution'
-                            ? { color: '#666', fontStyle: 'italic' }
-                            : entry.kind === 'user'
-                              ? { fontWeight: 600 }
-                              : entry.kind === 'doc'
-                                ? {
-                                    color: '#0a6640',
-                                    background: '#e6f5ee',
-                                    borderLeft: '3px solid #0a6640',
-                                    padding: '0.25rem 0.5rem',
-                                    fontFamily: 'monospace',
-                                  }
-                                : undefined
-                      }
-                    >
+                    <p key={i} className={entry.kind}>
                       {entry.kind === 'user' ? `You: ${entry.text}` : entry.text}
                     </p>
                   ))
@@ -647,6 +685,6 @@ export function App() {
           </div>
         </section>
       )}
-    </main>
+    </div>
   );
 }

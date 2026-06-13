@@ -55,7 +55,7 @@ const MIGRATIONS: string[] = [
   // The skill (from ~/.claude) loaded into the Session, if any.
   `ALTER TABLE sessions ADD COLUMN skill TEXT`,
   // Field Notes: David's pre-pipeline notes, parsed into Items and persisted as
-  // operational state per Project (ADR 0003). One note per Project (UNIQUE);
+  // operational state per Project (ADR 0004). One note per Project (UNIQUE);
   // dropping a new file replaces it.
   `CREATE TABLE field_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

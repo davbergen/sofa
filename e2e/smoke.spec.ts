@@ -12,7 +12,13 @@ test('open a Project from the UI and see it listed', async ({ page }) => {
   await page.getByLabel('Project directory').fill(dir);
   await page.getByRole('button', { name: 'Open Project' }).click();
 
-  const list = page.getByRole('list');
-  await expect(list.getByText(basename(dir), { exact: true })).toBeVisible();
-  await expect(list.getByText(dir, { exact: true })).toBeVisible();
+  // The Project renders as its own block with its name and path.
+  await expect(page.getByText(basename(dir), { exact: true })).toBeVisible();
+  await expect(page.getByText(dir, { exact: true })).toBeVisible();
+
+  // Its dashboard is expanded by default, so the three factory-floor panels
+  // are reachable by their accessible names without expanding anything.
+  await expect(page.getByRole('region', { name: 'Ready Issues' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Worker Runs' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Token Usage' })).toBeVisible();
 });

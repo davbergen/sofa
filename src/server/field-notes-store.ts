@@ -23,7 +23,7 @@ interface ItemRow {
 
 /**
  * SQLite-backed Field Notes memory, mirroring {@link SessionStore}: the parsed
- * note and its Items persist as operational state per Project (ADR 0003), so
+ * note and its Items persist as operational state per Project (ADR 0004), so
  * David's place in the list survives restarts and a different browser. One note
  * per Project — dropping a new file replaces the prior one.
  */

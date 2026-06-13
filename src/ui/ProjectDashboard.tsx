@@ -55,11 +55,12 @@ const STATE_LABELS: Record<RunState, string> = {
 
 const ACTIVE: RunState[] = ['cloning', 'working', 'pushing'];
 
-function stateColor(state: RunState): string {
-  if (state === 'pr_open') return 'seagreen';
-  if (state === 'failed') return 'crimson';
-  if (state === 'killed') return 'dimgray';
-  return 'darkorange';
+/** Maps a run's lifecycle state to a palette tone: sage=ok, rose=error, tan=active. */
+function stateTone(state: RunState): string {
+  if (state === 'pr_open') return 'ok';
+  if (state === 'failed') return 'err';
+  if (state === 'killed') return 'killed';
+  return 'active';
 }
 
 interface ActivityEntry {
@@ -90,26 +91,12 @@ function WorkerActivityFeed({ runId }: { runId: number }) {
   }, [runId]);
 
   return (
-    <div
-      role="log"
-      aria-label="Worker activity"
-      style={{
-        margin: '0.25rem 0 0.5rem',
-        padding: '0.5rem',
-        maxHeight: '12rem',
-        overflowY: 'auto',
-        background: '#1e1e1e',
-        color: '#d4d4d4',
-        fontFamily: 'monospace',
-        fontSize: '0.8rem',
-        borderRadius: '4px',
-      }}
-    >
+    <div role="log" aria-label="Worker activity" className="cz-feed mono">
       {entries.length === 0 ? (
-        <div style={{ color: '#888' }}>Waiting for Worker activity…</div>
+        <div className="wait">Waiting for Worker activity…</div>
       ) : (
         entries.map((entry, i) => (
-          <div key={i} style={{ whiteSpace: 'pre-wrap' }}>
+          <div key={i} className="line">
             {entry.message}
           </div>
         ))
@@ -118,7 +105,50 @@ function WorkerActivityFeed({ runId }: { runId: number }) {
   );
 }
 
-/** The factory floor for one Project: ready Issues, Dispatch, run records. */
+function ListIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 6h16M4 12h16M4 18h10" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2 2M16.5 16.5l2 2M18.5 5.5l-2 2M7.5 16.5l-2 2" />
+    </svg>
+  );
+}
+
+function ChartIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 17l5-5 4 4 8-8" />
+      <path d="M21 8v4h-4" />
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12h13M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+function NoteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </svg>
+  );
+}
+
+/** The factory floor for one Project: ready Issues, Dispatch, run records, usage. */
 export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [issues, setIssues] = useState<ReadyIssue[] | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
@@ -230,132 +260,206 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
     await refreshRuns();
   }
 
+  const total = usage?.total;
+  const hasUsage = !!total && total.totalTokens > 0;
+  // In/out bars are sized relative to the larger of the two, so the dominant
+  // direction fills the bar and the other is drawn to scale beside it.
+  const usageScale = total ? Math.max(total.inputTokens, total.outputTokens, 1) : 1;
+
   return (
-    <section style={{ margin: '0.5rem 0 1rem', paddingLeft: '1rem', borderLeft: '3px solid #ddd' }}>
-      <h3 style={{ margin: '0.5rem 0' }}>Field Notes</h3>
-      {notesError && <p role="alert" style={{ color: 'crimson' }}>{notesError}</p>}
-      <div
-        aria-label="Field Notes drop target"
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => void onDropNote(e)}
-        style={{
-          border: `2px dashed ${dragging ? '#0a6640' : '#bbb'}`,
-          background: dragging ? '#e6f5ee' : 'transparent',
-          borderRadius: 6,
-          padding: '0.75rem',
-          margin: '0.25rem 0 0.75rem',
-        }}
-      >
-        {!notes || !notes.hasNote ? (
-          <p style={{ margin: 0, color: '#666' }}>
-            Drag a <code>.txt</code> note here to capture the changes you want made.
-          </p>
-        ) : notes.items.length === 0 ? (
-          <p style={{ margin: 0, color: '#666' }}>
-            That note had no numbered items. Drop another <code>.txt</code> to try again.
-          </p>
-        ) : (
-          <ol style={{ margin: 0, paddingLeft: '1.25rem' }}>
-            {notes.items.map((item) => (
-              <li key={item.id} style={{ margin: '0.25rem 0', whiteSpace: 'pre-wrap' }}>
-                {item.text}
-              </li>
-            ))}
-          </ol>
+    <div className="cz-grid">
+      {/* Field Notes — the pre-pipeline entry ramp; full width across the grid. */}
+      <section className="cz-cush cz-card" style={{ gridColumn: '1 / -1' }} aria-label="Field Notes">
+        <div className="cz-card-h">
+          <span className="ic sage">
+            <NoteIcon />
+          </span>
+          <span className="ti">Field Notes</span>
+          <span className="tag">drag a .txt</span>
+        </div>
+        {notesError && <p role="alert" className="cz-alert">{notesError}</p>}
+        <div
+          aria-label="Field Notes drop target"
+          className={`cz-drop${dragging ? ' over' : ''}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => void onDropNote(e)}
+        >
+          {!notes || !notes.hasNote ? (
+            <div className="cz-empty">
+              <div className="t">Drop a .txt note here</div>
+              <div className="s">capture the changes you jotted while testing</div>
+            </div>
+          ) : notes.items.length === 0 ? (
+            <div className="cz-empty">
+              <div className="t">No items in that note</div>
+              <div className="s">drop another .txt with numbered lines</div>
+            </div>
+          ) : (
+            <div className="cz-fn">
+              {notes.items.map((item) => (
+                <div className="cz-issue" key={item.id}>
+                  <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
+                    {item.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Ready Issues — tall */}
+      <section className="cz-cush cz-card tall" aria-label="Ready Issues">
+        <div className="cz-card-h">
+          <span className="ic tan">
+            <ListIcon />
+          </span>
+          <span className="ti">Ready Issues</span>
+          <span className="tag">cut &amp; ready</span>
+        </div>
+        {issuesError && <p role="alert" className="cz-alert">{issuesError}</p>}
+        {issues === null && !issuesError && <p className="cz-muted">Loading Issues…</p>}
+        {issues?.length === 0 && (
+          <div className="cz-empty">
+            <div className="t">No ready Issues</div>
+            <div className="s">triage an issue to stock the line</div>
+          </div>
         )}
-      </div>
-
-      <h3 style={{ margin: '0.5rem 0' }}>Ready Issues</h3>
-      {issuesError && <p role="alert" style={{ color: 'crimson' }}>{issuesError}</p>}
-      {issues === null && !issuesError && <p>Loading Issues…</p>}
-      {issues?.length === 0 && <p>No ready Issues.</p>}
-      {issues && issues.length > 0 && (
-        <ul style={{ paddingLeft: '1.25rem' }}>
-          {issues.map((issue) => (
-            <li key={issue.number} style={{ margin: '0.25rem 0' }}>
-              <a href={issue.url} target="_blank" rel="noreferrer">
-                #{issue.number}
-              </a>{' '}
-              {issue.title}{' '}
-              <button onClick={() => void dispatchIssue(issue)} disabled={anyActive}>
-                Dispatch
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {dispatchError && <p role="alert" style={{ color: 'crimson' }}>{dispatchError}</p>}
-
-      <h3 style={{ margin: '0.5rem 0' }}>Worker Runs</h3>
-      {killError && <p role="alert" style={{ color: 'crimson' }}>{killError}</p>}
-      {runs.length === 0 ? (
-        <p>No Workers dispatched yet.</p>
-      ) : (
-        <ul style={{ paddingLeft: '1.25rem' }}>
-          {runs.map((run) => (
-            <li key={run.id} style={{ margin: '0.25rem 0' }}>
-              Issue #{run.issue}
-              {run.issueTitle ? ` — ${run.issueTitle}` : ''}{' '}
-              <span style={{ color: stateColor(run.state), fontWeight: 600 }}>
-                {STATE_LABELS[run.state]}
-              </span>{' '}
-              <small>started {run.startedAt}</small>
-              {ACTIVE.includes(run.state) && (
-                <>
-                  {' '}
-                  <button onClick={() => void killRun(run.id)}>Kill</button>
-                </>
-              )}
-              {run.state === 'pr_open' && run.prUrl && (
-                <>
-                  {' — '}
-                  <a href={run.prUrl} target="_blank" rel="noreferrer">
-                    view PR
+        {issues && issues.length > 0 && (
+          <div>
+            {issues.map((issue) => (
+              <div className="cz-issue" key={issue.number}>
+                <div className="row">
+                  <a className="id" href={issue.url} target="_blank" rel="noreferrer">
+                    #{issue.number}
                   </a>
-                </>
-              )}
-              {run.state === 'failed' && run.failureReason && (
-                <span style={{ color: 'crimson' }}> — {run.failureReason}</span>
-              )}
-              {run.state === 'killed' && run.failureReason && (
-                <span style={{ color: 'dimgray' }}> — {run.failureReason}</span>
-              )}
-              {usageByRun.has(run.id) && (
-                <small style={{ color: '#666' }}>
-                  {' — '}
-                  {formatTokens(usageByRun.get(run.id)!.totalTokens)} tokens
-                </small>
-              )}
-              {ACTIVE.includes(run.state) && <WorkerActivityFeed runId={run.id} />}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h3 style={{ margin: '0.5rem 0' }}>Token Usage</h3>
-      {!usage || usage.total.totalTokens === 0 ? (
-        <p>No usage recorded yet.</p>
-      ) : (
-        <>
-          <p style={{ margin: '0.25rem 0' }}>
-            Total: <strong>{formatTokens(usage.total.totalTokens)}</strong> tokens (
-            {formatTokens(usage.total.inputTokens)} in, {formatTokens(usage.total.outputTokens)} out,{' '}
-            {formatTokens(usage.total.cacheReadTokens + usage.total.cacheCreationTokens)} cache)
-          </p>
-          <ul style={{ paddingLeft: '1.25rem' }}>
-            {usage.byDay.map((day) => (
-              <li key={day.day} style={{ margin: '0.25rem 0' }}>
-                {day.day}: {formatTokens(day.totalTokens)} tokens (
-                {formatTokens(day.inputTokens)} in, {formatTokens(day.outputTokens)} out)
-              </li>
+                </div>
+                <div className="txt">{issue.title}</div>
+                <button className="cz-disp" onClick={() => void dispatchIssue(issue)} disabled={anyActive}>
+                  Dispatch
+                  <ArrowIcon />
+                </button>
+              </div>
             ))}
-          </ul>
-        </>
-      )}
-    </section>
+          </div>
+        )}
+        {dispatchError && <p role="alert" className="cz-alert">{dispatchError}</p>}
+      </section>
+
+      {/* Worker Runs */}
+      <section className="cz-cush cz-card" aria-label="Worker Runs">
+        <div className="cz-card-h">
+          <span className="ic sage">
+            <GearIcon />
+          </span>
+          <span className="ti">Worker Runs</span>
+          <span className="tag">{anyActive ? 'running' : 'idle'}</span>
+        </div>
+        {killError && <p role="alert" className="cz-alert">{killError}</p>}
+        {runs.length === 0 ? (
+          <div className="cz-empty">
+            <div className="eic">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 6v6l4 2" />
+                <circle cx="12" cy="12" r="9" />
+              </svg>
+            </div>
+            <div className="t">No workers dispatched yet</div>
+            <div className="s">dispatch an issue to wake the line</div>
+          </div>
+        ) : (
+          <div>
+            {runs.map((run) => {
+              const tone = stateTone(run.state);
+              const runUsage = usageByRun.get(run.id);
+              return (
+                <div className="cz-run" key={run.id}>
+                  <div className="row">
+                    <span className="id">#{run.issue}</span>
+                    <span className="nm">{run.issueTitle}</span>
+                    <span className={`state ${tone}`}>{STATE_LABELS[run.state]}</span>
+                    {ACTIVE.includes(run.state) && (
+                      <button className="cz-kill" onClick={() => void killRun(run.id)}>
+                        Kill
+                      </button>
+                    )}
+                  </div>
+                  <div className="meta">
+                    <span className="mono">started {run.startedAt}</span>
+                    {run.state === 'pr_open' && run.prUrl && (
+                      <a href={run.prUrl} target="_blank" rel="noreferrer">
+                        view PR
+                      </a>
+                    )}
+                    {runUsage && <span>{formatTokens(runUsage.totalTokens)} tokens</span>}
+                    {run.state === 'failed' && run.failureReason && (
+                      <span className="reason err">{run.failureReason}</span>
+                    )}
+                    {run.state === 'killed' && run.failureReason && (
+                      <span className="reason killed">{run.failureReason}</span>
+                    )}
+                  </div>
+                  {ACTIVE.includes(run.state) && <WorkerActivityFeed runId={run.id} />}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Token Usage */}
+      <section className="cz-cush cz-card" aria-label="Token Usage">
+        <div className="cz-card-h">
+          <span className="ic rose">
+            <ChartIcon />
+          </span>
+          <span className="ti">Token Usage</span>
+          <span className="tag">all runs</span>
+        </div>
+        {!hasUsage ? (
+          <div className="cz-empty">
+            <div className="s mono">No usage recorded yet</div>
+          </div>
+        ) : (
+          <>
+            <div className="cz-usage">
+              <div className="cz-num">
+                {formatTokens(total!.totalTokens)}
+                <span> tok</span>
+              </div>
+              <div className="cz-bars">
+                <div className="cz-brow">
+                  <span>in</span>
+                  <span className="bar">
+                    <i style={{ width: `${(total!.inputTokens / usageScale) * 100}%`, background: 'var(--tan)' }} />
+                  </span>
+                </div>
+                <div className="cz-brow">
+                  <span>out</span>
+                  <span className="bar">
+                    <i style={{ width: `${(total!.outputTokens / usageScale) * 100}%`, background: 'var(--rose)' }} />
+                  </span>
+                </div>
+              </div>
+            </div>
+            <ul className="cz-days">
+              {usage!.byDay.map((day) => (
+                <li key={day.day}>
+                  <span className="mono">{day.day}</span>
+                  <span>
+                    {formatTokens(day.totalTokens)} tok ({formatTokens(day.inputTokens)} in,{' '}
+                    {formatTokens(day.outputTokens)} out)
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+    </div>
   );
 }

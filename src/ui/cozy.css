@@ -1,0 +1,879 @@
+/*
+ * Cozy Workshop — the shared design-token stylesheet for the Sofa UI.
+ *
+ * A warm dark-espresso theme: upholstery-toned cushioned panels with stitched
+ * dashed-seam borders, Hanken Grotesk + Spline Sans Mono. The palette lives in
+ * CSS custom properties so every surface (home, transcript, PRD, sessions,
+ * question/permission prompts) is themed from one place. See ADR-0003 for why
+ * this is a stylesheet rather than inline styles: the seams (::before),
+ * gradients, and :hover states cannot be expressed inline.
+ */
+
+:root {
+  --bg: #211a16;
+  --bg2: #271f1a;
+  --cush: #30261f;
+  --cush2: #3a2e26;
+  --line: #473930;
+  --seam: #5c4a3d;
+  --cream: #f1e6d6;
+  --tx: #e3d6c4;
+  --tx2: #b3a290;
+  --tx3: #857463;
+  --tan: #cda878;
+  --tan-d: #a8814f;
+  --sage: #a3ad8c;
+  --sage-d: #7c8763;
+  --rose: #cf9d8c;
+  --rose-d: #a8786a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(140% 110% at 50% -20%, #2c2219 0%, var(--bg) 60%) fixed;
+  color: var(--tx);
+  font-family: 'Hanken Grotesk', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Fluid, centered container — replaces the mockup's fixed 1280x980 frame. */
+.cz-app {
+  max-width: 1180px;
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: 38px clamp(20px, 4vw, 46px) 56px;
+}
+
+.cz-app.wide {
+  max-width: 1320px;
+}
+
+.mono {
+  font-family: 'Spline Sans Mono', ui-monospace, monospace;
+}
+
+/* ---- stitched cushion panel ------------------------------------------- */
+.cz-cush {
+  position: relative;
+  background: linear-gradient(165deg, var(--cush2), var(--cush));
+  border-radius: 22px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+.cz-cush::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 1.5px dashed var(--seam);
+  border-radius: 15px;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* ---- brand header ----------------------------------------------------- */
+.cz-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 30px;
+}
+.cz-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.cz-logo {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: 18px;
+  background: linear-gradient(160deg, var(--tan), var(--tan-d));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 8px 20px rgba(168, 129, 79, 0.3);
+}
+.cz-logo::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1.5px dashed rgba(255, 255, 255, 0.35);
+  border-radius: 13px;
+}
+.cz-logo svg {
+  width: 32px;
+  height: 32px;
+  position: relative;
+}
+.cz-word {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--cream);
+  line-height: 1;
+}
+.cz-sub {
+  font-size: 11.5px;
+  letter-spacing: 1px;
+  color: var(--tx3);
+  margin-top: 5px;
+}
+.cz-stamp {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--tan-d);
+  border: 1.5px solid var(--tan-d);
+  border-radius: 7px;
+  padding: 6px 12px;
+  transform: rotate(-3deg);
+  text-transform: uppercase;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+/* ---- open-project field ----------------------------------------------- */
+.cz-open {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.cz-field {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  padding: 15px 18px;
+  font-size: 14px;
+  color: var(--tx);
+  font-family: 'Spline Sans Mono', ui-monospace, monospace;
+}
+.cz-field::placeholder {
+  color: var(--tx3);
+}
+.cz-field:focus {
+  outline: none;
+  border-color: var(--tan-d);
+}
+
+/* ---- buttons ---------------------------------------------------------- */
+.cz-btn {
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  padding: 0 24px;
+  min-height: 48px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--cush2);
+  color: var(--tx);
+}
+.cz-btn:hover:not(:disabled) {
+  border-color: var(--seam);
+  color: var(--cream);
+}
+.cz-btn.tan {
+  background: linear-gradient(160deg, var(--tan), var(--tan-d));
+  color: #2a1d0f;
+  border: 0;
+  box-shadow: 0 6px 16px rgba(168, 129, 79, 0.28);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.cz-btn.tan:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.cz-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- section heading -------------------------------------------------- */
+.cz-h {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+.cz-h .t {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--cream);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.cz-h .d {
+  flex: 1;
+  height: 1.5px;
+  border-top: 1.5px dashed var(--line);
+}
+.cz-h .c {
+  font-size: 11px;
+  color: var(--tx3);
+}
+
+/* ---- per-Project block ------------------------------------------------ */
+.cz-project {
+  margin-bottom: 34px;
+}
+
+/* dispatch bar */
+.cz-dispatch {
+  padding: 18px 22px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.cz-prompt {
+  flex: 1;
+  min-width: 220px;
+  font-size: 17px;
+  color: var(--tx);
+  font-weight: 500;
+  font-family: inherit;
+  background: transparent;
+  border: 0;
+  border-bottom: 1.5px dashed var(--line);
+  padding: 8px 2px;
+}
+.cz-prompt::placeholder {
+  color: var(--tx2);
+}
+.cz-prompt:focus {
+  outline: none;
+  border-bottom-color: var(--tan-d);
+}
+
+/* skill chip wrapping a native select */
+.cz-skill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 7px 14px;
+}
+.cz-skill .k {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--tx3);
+  text-transform: uppercase;
+}
+.cz-skill select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--sage);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  padding-right: 14px;
+}
+.cz-skill select:focus {
+  outline: none;
+}
+.cz-skill select option {
+  color: #1a140f;
+}
+
+/* project header */
+.cz-projhead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.cz-projhead .av {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 13px;
+  background: var(--cush2);
+  border: 1.5px solid var(--seam);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tan);
+}
+.cz-projhead .nm {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--cream);
+}
+.cz-projhead .pa {
+  font-size: 12px;
+  color: var(--tx3);
+}
+.cz-projhead .acts {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+.cz-tab {
+  font-size: 12.5px;
+  color: var(--tx2);
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 11px;
+  padding: 9px 16px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.cz-tab:hover {
+  border-color: var(--seam);
+  color: var(--cream);
+}
+
+/* ---- dashboard grid --------------------------------------------------- */
+.cz-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.95fr;
+  grid-template-rows: auto auto;
+  gap: 18px;
+}
+@media (max-width: 760px) {
+  .cz-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.cz-card {
+  padding: 20px 22px;
+}
+.cz-card.tall {
+  grid-row: span 2;
+}
+.cz-card-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.cz-card-h .ic {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cz-card-h .ic.tan {
+  background: rgba(205, 168, 120, 0.14);
+  color: var(--tan);
+}
+.cz-card-h .ic.sage {
+  background: rgba(163, 173, 140, 0.15);
+  color: var(--sage);
+}
+.cz-card-h .ic.rose {
+  background: rgba(207, 157, 140, 0.15);
+  color: var(--rose);
+}
+.cz-card-h .ti {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cream);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.cz-card-h .tag {
+  margin-left: auto;
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--tx3);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ready issue card */
+.cz-issue {
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 15px;
+  padding: 14px 15px;
+  margin-bottom: 12px;
+}
+.cz-issue .row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+.cz-issue .id {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tan);
+  background: rgba(205, 168, 120, 0.13);
+  border-radius: 7px;
+  padding: 2px 9px;
+  text-decoration: none;
+}
+.cz-issue .txt {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--tx);
+}
+.cz-disp {
+  margin-top: 12px;
+  background: var(--sage);
+  color: #21261a;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cz-disp:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.cz-disp:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- Field Notes drop target + parsed Items --------------------------- */
+.cz-drop {
+  border: 2px dashed var(--seam);
+  border-radius: 14px;
+  padding: 8px 10px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.cz-drop.over {
+  border-color: var(--sage);
+  background: rgba(163, 173, 140, 0.08);
+}
+.cz-fn {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* empty / zero states */
+.cz-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 11px;
+  color: var(--tx3);
+  padding: 24px 12px;
+}
+.cz-empty .eic {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--seam);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tx3);
+}
+.cz-empty .t {
+  font-size: 13.5px;
+  color: var(--tx2);
+  font-weight: 600;
+}
+.cz-empty .s {
+  font-size: 12px;
+  color: var(--tx3);
+}
+
+/* ---- worker run rows -------------------------------------------------- */
+.cz-run {
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 15px;
+  padding: 14px 15px;
+  margin-bottom: 12px;
+}
+.cz-run .row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.cz-run .id {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tan);
+  background: rgba(205, 168, 120, 0.13);
+  border-radius: 7px;
+  padding: 2px 9px;
+}
+.cz-run .nm {
+  font-size: 13px;
+  color: var(--tx);
+  flex: 1;
+  min-width: 0;
+}
+.cz-run .state {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.cz-run .state.active {
+  color: var(--tan);
+}
+.cz-run .state.ok {
+  color: var(--sage);
+}
+.cz-run .state.err {
+  color: var(--rose);
+}
+.cz-run .state.killed {
+  color: var(--tx3);
+}
+.cz-run .meta {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--tx3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cz-run .reason.err {
+  color: var(--rose);
+}
+.cz-run .reason.killed {
+  color: var(--tx3);
+}
+.cz-run a {
+  color: var(--sage);
+}
+.cz-kill {
+  background: transparent;
+  color: var(--rose);
+  border: 1.5px solid var(--rose-d);
+  border-radius: 9px;
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cz-kill:hover {
+  background: rgba(207, 157, 140, 0.12);
+}
+
+/* live activity feed — monospace on a dark inset */
+.cz-feed {
+  margin-top: 12px;
+  padding: 12px 13px;
+  max-height: 12rem;
+  overflow-y: auto;
+  background: #19130f;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  color: var(--tx2);
+  font-family: 'Spline Sans Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cz-feed .line {
+  white-space: pre-wrap;
+}
+.cz-feed .wait {
+  color: var(--tx3);
+}
+
+/* ---- token usage ------------------------------------------------------ */
+.cz-usage {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.cz-num {
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--cream);
+  letter-spacing: -1.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.cz-num span {
+  font-size: 14px;
+  color: var(--tx3);
+  font-weight: 500;
+}
+.cz-bars {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.cz-brow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--tx3);
+}
+.cz-brow > span:first-child {
+  width: 22px;
+}
+.cz-brow .bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg2);
+  overflow: hidden;
+}
+.cz-brow .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+.cz-days {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+.cz-days li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--tx2);
+  padding: 5px 0;
+  border-top: 1px dashed var(--line);
+}
+.cz-days .mono {
+  color: var(--tx3);
+}
+
+/* ---- shared secondary surfaces (transcript, PRD, sessions, prompts) --- */
+.cz-section {
+  margin-top: 30px;
+}
+.cz-section h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--cream);
+  margin: 0 0 14px;
+}
+.cz-section .lede {
+  color: var(--tx2);
+  font-size: 13.5px;
+  margin: 0 0 14px;
+}
+
+.cz-split {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+}
+.cz-split > .main {
+  flex: 1;
+  min-width: 0;
+}
+
+.cz-transcript {
+  padding: 20px 22px;
+}
+.cz-transcript p {
+  margin: 0 0 12px;
+  line-height: 1.55;
+  font-size: 14px;
+  color: var(--tx);
+}
+.cz-transcript p:last-child {
+  margin-bottom: 0;
+}
+.cz-transcript .error {
+  color: var(--rose);
+}
+.cz-transcript .resolution {
+  color: var(--tx3);
+  font-style: italic;
+}
+.cz-transcript .user {
+  color: var(--cream);
+  font-weight: 600;
+}
+.cz-transcript .doc {
+  color: var(--sage);
+  background: rgba(163, 173, 140, 0.1);
+  border-left: 3px solid var(--sage-d);
+  padding: 6px 10px;
+  border-radius: 0 8px 8px 0;
+  font-family: 'Spline Sans Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+}
+.cz-transcript .wait {
+  color: var(--tx3);
+}
+
+/* PRD draft panel */
+.cz-prd {
+  flex: 1;
+  min-width: 0;
+  align-self: flex-start;
+  padding: 20px 22px;
+}
+.cz-prd h3 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: var(--cream);
+}
+.cz-prd .doc {
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 15px;
+  white-space: pre-wrap;
+  font-family: 'Spline Sans Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--tx);
+  max-height: 26rem;
+  overflow-y: auto;
+}
+.cz-prd .pub {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--tx2);
+}
+.cz-prd .pub a {
+  color: var(--sage);
+}
+
+/* inline revise form */
+.cz-revise {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.cz-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  color: var(--tx);
+  font-family: inherit;
+}
+.cz-input::placeholder {
+  color: var(--tx3);
+}
+.cz-input:focus {
+  outline: none;
+  border-color: var(--tan-d);
+}
+
+/* past sessions list */
+.cz-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cz-sessions li {
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 13px;
+  padding: 13px 15px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cz-sessions .pr {
+  flex: 1;
+  min-width: 0;
+  color: var(--tx);
+  font-size: 13.5px;
+}
+.cz-sessions .st {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--tx3);
+}
+
+/* question forms and permission prompts */
+.cz-form,
+.cz-perm {
+  padding: 18px 20px;
+  margin-top: 14px;
+}
+.cz-form .q {
+  margin: 0 0 12px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--cream);
+}
+.cz-form label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13.5px;
+  color: var(--tx);
+}
+.cz-form label small {
+  color: var(--tx3);
+}
+.cz-form label em {
+  color: var(--sage);
+  font-style: normal;
+}
+.cz-perm .q {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cream);
+}
+.cz-perm pre {
+  background: #19130f;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 13px;
+  overflow-x: auto;
+  color: var(--tx2);
+  font-family: 'Spline Sans Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+.cz-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* alert / error text */
+.cz-alert {
+  color: var(--rose);
+  font-size: 13.5px;
+  margin: 12px 0;
+}
+
+.cz-muted {
+  color: var(--tx3);
+  font-size: 13.5px;
+}
