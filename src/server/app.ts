@@ -16,6 +16,7 @@ import { READY_LABEL } from './adapters.js';
 import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
 import { readSofaConfig, SofaConfigError } from './sofa-config.js';
 import { projectUsage, recordRunUsage, recordSessionUsage, withUsageRecording } from './usage.js';
+import { FsBrowseError, listDirectory } from './fs-browse.js';
 
 export interface Project {
   id: number;
@@ -144,6 +145,21 @@ export function createApp(
       .prepare('SELECT id, dir, name, opened_at FROM open_projects ORDER BY id')
       .all() as unknown as ProjectRow[];
     return c.json(rows.map(toProject));
+  });
+
+  // Read-only host directory browser feeding the Open-a-Project picker. The
+  // browser can't read host paths, but the server can; the UI navigates this
+  // one step at a time and writes a chosen absolute path back into the open
+  // field. A bad/unreadable path returns a clean 4xx the picker shows inline.
+  app.get('/api/fs/list', async (c) => {
+    try {
+      return c.json(await listDirectory(c.req.query('path')));
+    } catch (err) {
+      if (err instanceof FsBrowseError) {
+        return c.json({ error: err.message }, err.status);
+      }
+      throw err;
+    }
   });
 
   app.post('/api/projects', async (c) => {
