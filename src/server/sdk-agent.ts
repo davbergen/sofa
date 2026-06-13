@@ -81,7 +81,7 @@ interface AskUserQuestionInput {
 export class SdkAgent implements Agent {
   constructor(private readonly options: SdkAgentOptions = {}) {}
 
-  run({ prompt, cwd, skill, resume }: AgentRunInput): AgentSession {
+  run({ prompt, cwd, skill, resume, model }: AgentRunInput): AgentSession {
     // SessionRun doubles as a push-based event buffer here, merging events
     // from the SDK message loop and the canUseTool callback into one stream.
     const out = new SessionRun();
@@ -139,6 +139,7 @@ export class SdkAgent implements Agent {
         // uses (settingSources defaults to all sources); naming one here
         // enables it and loads its frontmatter into the system prompt.
         ...(skill ? { skills: [skill] } : {}),
+        ...(model ? { model } : {}),
       },
     });
 

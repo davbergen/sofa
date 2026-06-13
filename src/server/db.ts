@@ -106,6 +106,10 @@ const MIGRATIONS: string[] = [
   // in Sofa's own store, never written to the Project's sofa.json. NULL = Default
   // (no model override). Curated aliases only: opus, sonnet, haiku, fable.
   `ALTER TABLE open_projects ADD COLUMN worker_model TEXT`,
+  // Per-Project Session model selection (ADR 0005): same design as worker_model —
+  // operational preference in the store, never written to any repo file.
+  // NULL = Default (no override). Curated aliases only: opus, sonnet, haiku, fable.
+  `ALTER TABLE open_projects ADD COLUMN session_model TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {
