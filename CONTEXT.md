@@ -33,8 +33,9 @@ built. Published to the Project's GitHub issue tracker.
 _Avoid_: spec, plan
 
 **Issue**:
-A unit of implementable work derived from a PRD. Lives on GitHub — GitHub is
-the source of truth for all tracked work.
+A unit of implementable work, derived from a PRD or cut directly from a
+self-contained Field Note Item. Lives on GitHub — GitHub is the source of truth
+for all tracked work.
 _Avoid_: ticket, task
 
 **Worker**:
@@ -61,7 +62,8 @@ _Avoid_: backlog, todo list, spec, PRD
 
 **Field Note Item**:
 A single actionable change parsed out of Field Notes. David acts on one Item
-at a time, either escalating it into a Grilling Session or implementing it
-directly; the Item then carries an acted status and a link to the Session it
-spawned, so returning later shows what is left to do.
-_Avoid_: issue (an Item is not yet tracked work), task
+at a time, either escalating an unclear one into a Grilling Session or cutting
+a self-contained one directly into an Issue; the Item then carries an acted
+status and a link to whatever it spawned — the Grilling Session, or the Issue
+it became — so returning later shows what is left to do.
+_Avoid_: issue (an Item only becomes an Issue once cut), task
