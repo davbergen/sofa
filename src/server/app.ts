@@ -2,12 +2,17 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { DatabaseSync } from 'node:sqlite';
 import { stat } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import type { Agent, AgentRunInput } from './agent.js';
 import { SessionRegistry } from './sessions.js';
+import { fsSkillSource, type SkillSource } from './skills.js';
+import { ActivityRegistry } from './activity.js';
 import { SessionStore } from './session-store.js';
-import type { ContainerAdapter, GitHubAdapter } from './ports.js';
-import { ACTIVE_STATES, applyEvent, type RunState } from './runs.js';
+import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
+import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
+import { readSofaConfig, SofaConfigError } from './sofa-config.js';
+import { projectUsage, recordRunUsage, recordSessionUsage, withUsageRecording } from './usage.js';
 
 export interface Project {
   id: number;
@@ -78,14 +83,32 @@ export const PRD_LABEL = 'prd';
 /** Label applied to every approved Issue so the Ralph Loop can pick it up. */
 export const READY_LABEL = 'ready-for-agent';
 
-export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono {
+export function createApp(
+  db: DatabaseSync,
+  agent: Agent,
+  deps?: AppDeps,
+  skills?: SkillSource,
+): Hono {
   const app = new Hono();
   const sessions = new SessionRegistry();
+  // Skills come from the user's real ~/.claude by default (one source of
+  // truth shared with the CLI); tests inject a temp-dir source instead.
+  const skillSource = skills ?? fsSkillSource(join(homedir(), '.claude'));
+  const activity = new ActivityRegistry();
+  // Live grips on this process's Worker containers, for the kill switch.
+  const workerHandles = new Map<number, WorkerHandle>();
   const store = new SessionStore(db);
 
-  /** Runs one Agent turn for a Session, persisting events as they stream. */
-  function runSession(sessionId: number, input: AgentRunInput): void {
-    sessions.start(sessionId, agent.run(input), {
+  /**
+   * Runs one Agent turn for a Session, persisting events as they stream.
+   * The quota meter taps the event stream: usage reports are persisted as
+   * they stream by; Agents that emit none simply record nothing.
+   */
+  function runSession(projectId: number, sessionId: number, input: AgentRunInput): void {
+    const agentSession = withUsageRecording(agent.run(input), (usage) =>
+      recordSessionUsage(db, projectId, sessionId, usage),
+    );
+    sessions.start(sessionId, agentSession, {
       onEvent: (event) => store.appendEvent(sessionId, event),
       onFinish: (errored) => store.setStatus(sessionId, errored ? 'error' : 'done'),
     });
@@ -134,6 +157,18 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     return c.json(toProject(row), 201);
   });
 
+  // Skills discoverable from the user's ~/.claude setup, loadable into a Session.
+  app.get('/api/skills', async (c) => {
+    try {
+      return c.json(await skillSource.list());
+    } catch (err) {
+      return c.json(
+        { error: `listing skills failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
   // Start an interactive Session against an open Project.
   app.post('/api/projects/:projectId/sessions', async (c) => {
     const projectId = Number(c.req.param('projectId'));
@@ -149,9 +184,11 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     if (!prompt) {
       return c.json({ error: 'prompt is required' }, 400);
     }
+    // Optionally load a skill from the user's ~/.claude setup into the Session.
+    const skill = typeof body?.skill === 'string' && body.skill.trim() ? body.skill.trim() : null;
 
-    const session = store.create(projectId, prompt);
-    runSession(session.id, { prompt, cwd: project.dir });
+    const session = store.create(projectId, prompt, skill);
+    runSession(projectId, session.id, { prompt, cwd: project.dir, ...(skill ? { skill } : {}) });
     return c.json(session, 201);
   });
 
@@ -200,7 +237,12 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .prepare('SELECT dir FROM open_projects WHERE id = ?')
       .get(session.projectId) as unknown as { dir: string };
     store.setStatus(sessionId, 'running');
-    runSession(sessionId, { prompt, cwd: project.dir, resume: session.agentSessionId });
+    runSession(session.projectId, sessionId, {
+      prompt,
+      cwd: project.dir,
+      resume: session.agentSessionId,
+      ...(session.skill ? { skill: session.skill } : {}),
+    });
     return c.json(store.get(sessionId));
   });
 
@@ -386,6 +428,15 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     }
   });
 
+  // The quota meter: per-run usage plus aggregates over time for one Project.
+  app.get('/api/projects/:id/usage', (c) => {
+    const project = getProject(c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'no such Project' }, 404);
+    }
+    return c.json(projectUsage(db, project.id));
+  });
+
   app.get('/api/projects/:id/runs', (c) => {
     const project = getProject(c.req.param('id'));
     if (!project) {
@@ -395,6 +446,22 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE project_id = ? ORDER BY id DESC`)
       .all(project.id) as unknown as RunRow[];
     return c.json(rows.map(toRun));
+  });
+
+  // Live Worker activity: replays the buffered tail, then streams until the
+  // run reaches a terminal state. Mirrors the Session events endpoint above.
+  app.get('/api/runs/:runId/activity', (c) => {
+    const runId = Number(c.req.param('runId'));
+    const feed = activity.get(runId);
+    if (!feed) {
+      return c.json({ error: `no activity feed for run ${runId}` }, 404);
+    }
+    return streamSSE(c, async (stream) => {
+      for await (const entry of feed.stream()) {
+        await stream.writeSSE({ event: 'activity', data: JSON.stringify(entry) });
+      }
+      await stream.writeSSE({ event: 'done', data: '{}' });
+    });
   });
 
   app.post('/api/projects/:id/runs', async (c) => {
@@ -422,6 +489,18 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       return c.json({ error: 'a Worker is already running for this Project' }, 409);
     }
 
+    // An invalid sofa.json rejects the dispatch outright (no run record) —
+    // silently falling back to the generic image would mask the problem.
+    let workerImage: string | undefined;
+    try {
+      workerImage = (await readSofaConfig(project.dir)).workerImage;
+    } catch (err) {
+      if (err instanceof SofaConfigError) {
+        return c.json({ error: err.message }, 422);
+      }
+      throw err;
+    }
+
     let repo: string;
     try {
       repo = await deps.github.resolveRepo(project.dir);
@@ -434,7 +513,27 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .run(project.id, issue, issueTitle);
     const runId = Number(lastInsertRowid);
 
-    deps.container.startWorker({ repo, issue }, (event) => {
+    const feed = activity.start(runId);
+    const handle = deps.container.startWorker(
+      { repo, issue, ...(workerImage ? { image: workerImage } : {}) },
+      (event) => {
+      // Mirror every event onto the run's live activity feed.
+      switch (event.type) {
+        case 'activity':
+          feed.push(event.message);
+          return; // feed-only; never touches the run record
+        case 'phase':
+          feed.push(`phase: ${event.phase}`);
+          break;
+        case 'succeeded':
+          feed.push(`opened PR ${event.prUrl}`);
+          feed.finish();
+          break;
+        case 'failed':
+          feed.push(`failed: ${event.reason}`);
+          feed.finish();
+          break;
+      }
       const row = db
         .prepare('SELECT state FROM worker_runs WHERE id = ?')
         .get(runId) as unknown as { state: RunState } | undefined;
@@ -451,12 +550,57 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
         update.failureReason ?? null,
         runId,
       );
+      // Quota meter: terminal events may carry the run's token usage. Stale
+      // events were already filtered above, so a run records at most once.
+      if ((event.type === 'succeeded' || event.type === 'failed') && event.usage) {
+        recordRunUsage(db, project.id, runId, event.usage);
+      }
+      if (!isActive(update.state)) {
+        workerHandles.delete(runId);
+      }
     });
+    workerHandles.set(runId, handle);
 
     const row = db
       .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE id = ?`)
       .get(runId) as unknown as RunRow;
     return c.json(toRun(row), 201);
+  });
+
+  // The kill switch: stop a running Worker's container and mark its run killed.
+  app.post('/api/runs/:id/kill', async (c) => {
+    const runId = Number(c.req.param('id'));
+    const row = db
+      .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE id = ?`)
+      .get(runId) as unknown as RunRow | undefined;
+    if (!row) {
+      return c.json({ error: `no run with id ${runId}` }, 404);
+    }
+    if (!isActive(row.state as RunState)) {
+      return c.json({ error: `run ${runId} is not active (state: ${row.state})` }, 409);
+    }
+
+    const handle = workerHandles.get(runId);
+    if (handle) {
+      await handle.stop();
+      workerHandles.delete(runId);
+    }
+    // Terminal `killed` frees the Project's Worker slot; any straggler events
+    // from the dying container are ignored by applyEvent.
+    db.prepare("UPDATE worker_runs SET state = 'killed', failure_reason = ? WHERE id = ?").run(
+      'killed by user',
+      runId,
+    );
+    const feed = activity.get(runId);
+    if (feed) {
+      feed.push('killed by user');
+      feed.finish();
+    }
+
+    const updated = db
+      .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE id = ?`)
+      .get(runId) as unknown as RunRow;
+    return c.json(toRun(updated));
   });
 
   return app;

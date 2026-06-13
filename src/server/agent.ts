@@ -1,6 +1,8 @@
-// The Agent adapter: every Claude interaction goes through this seam so the
+﻿// The Agent adapter: every Claude interaction goes through this seam so the
 // server core stays pure and testable. The real implementation wraps the
 // Claude Agent SDK (see sdk-agent.ts); tests inject a fake (see fake-agent.ts).
+
+import type { TokenUsage } from './ports.js';
 
 export interface AssistantTextEvent {
   type: 'assistant_text';
@@ -100,6 +102,24 @@ export interface IssuesPublishedEvent {
   issues: Array<{ number: number; url: string }>;
 }
 
+/**
+ * The Agent wrote or updated one of the Project's living documents
+ * (CONTEXT.md or a file under docs/adr/), derived from tool-use messages.
+ */
+export interface FileWriteEvent {
+  type: 'file_write';
+  /** The written file's path as reported by the tool call. */
+  path: string;
+  /** The tool that performed the write (Write, Edit, ...). */
+  toolName: string;
+}
+
+/** Token usage the SDK reported for the turn, for the quota meter. Optional: not every Agent emits one. */
+export interface UsageEvent {
+  type: 'usage';
+  usage: TokenUsage;
+}
+
 export type AgentEvent =
   | AssistantTextEvent
   | AgentErrorEvent
@@ -112,13 +132,17 @@ export type AgentEvent =
   | UserMessageEvent
   | PrdPublishedEvent
   | IssueBreakdownEvent
-  | IssuesPublishedEvent;
+  | IssuesPublishedEvent
+  | FileWriteEvent
+  | UsageEvent;
 
 export interface AgentRunInput {
   /** The user prompt that starts (or continues) the Session. */
   prompt: string;
   /** The open Project's directory; interactive Sessions run on the host against the real working copy. */
   cwd: string;
+  /** Name of a skill from the user's ~/.claude setup to load into the Session. */
+  skill?: string;
   /** Resume an earlier Agent session by its handle (the SDK session id). */
   resume?: string;
 }

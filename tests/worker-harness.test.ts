@@ -177,6 +177,34 @@ describe('runWorker', () => {
     });
   });
 
+  it('carries the agent-reported token usage into the success outcome', async () => {
+    const usage = { inputTokens: 100, outputTokens: 25, cacheReadTokens: 400, cacheCreationTokens: 50 };
+    const agent: Agent = { implementIssue: () => Promise.resolve(usage) };
+    const { outcome } = run(happyRules(), agent);
+
+    expect(await outcome).toMatchObject({ outcome: 'succeeded', usage });
+  });
+
+  it('carries the agent-reported usage even when a later step fails', async () => {
+    const usage = { inputTokens: 100, outputTokens: 25, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    const agent: Agent = { implementIssue: () => Promise.resolve(usage) };
+    const rules = happyRules();
+    rules.unshift([/^git push/, failWith('remote: permission denied', 128)]);
+    const { outcome } = run(rules, agent);
+
+    expect(await outcome).toMatchObject({
+      outcome: 'failed',
+      reason: expect.stringContaining('git push failed'),
+      usage,
+    });
+  });
+
+  it('omits usage when the agent reports none', async () => {
+    const { outcome } = run(happyRules());
+
+    expect(await outcome).not.toHaveProperty('usage');
+  });
+
   it('never leaks the GitHub token in failure reasons', async () => {
     const { outcome } = run([
       [/^git clone/, failWith(`fatal: unable to access https://x-access-token:${TOKEN}@github.com/`, 128)],

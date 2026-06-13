@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { openDb } from '../src/server/db';
 import { createApp, type AppDeps, type Run } from '../src/server/app';
+import { parseOutcomeLine } from '../src/server/adapters';
 import { FakeAgent } from '../src/server/fake-agent';
+import type { ProjectUsage } from '../src/server/usage';
 import type {
   ContainerAdapter,
   GitHubAdapter,
   ReadyIssue,
   StartWorkerOptions,
+  TokenUsage,
   WorkerEvent,
 } from '../src/server/ports';
 
@@ -50,6 +53,7 @@ function fakeContainer() {
     startWorker(opts, handler) {
       launches.push(opts);
       onEvent = handler;
+      return { stop: () => Promise.resolve() };
     },
   };
   return { container, launches, emit: (event: WorkerEvent) => onEvent?.(event) };
@@ -190,6 +194,59 @@ describe('dispatching a Worker', () => {
   });
 });
 
+describe('Worker image override (sofa.json)', () => {
+  it('launches with the image from sofa.json when one is configured', async () => {
+    const h = makeHarness();
+    const { dir, project } = await openProject(h.app);
+    writeFileSync(join(dir, 'sofa.json'), JSON.stringify({ workerImage: 'sofa-worker-rust' }));
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches).toEqual([{ repo: 'davbergen/scratch', issue: 7, image: 'sofa-worker-rust' }]);
+  });
+
+  it('launches with no image override when there is no sofa.json', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches).toEqual([{ repo: 'davbergen/scratch', issue: 7 }]);
+    expect(h.launches[0].image).toBeUndefined();
+  });
+
+  it('launches with no image override when sofa.json omits workerImage', async () => {
+    const h = makeHarness();
+    const { dir, project } = await openProject(h.app);
+    writeFileSync(join(dir, 'sofa.json'), JSON.stringify({}));
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(201);
+    expect(h.launches[0].image).toBeUndefined();
+  });
+
+  it.each([
+    ['malformed JSON', '{ "workerImage": '],
+    ['a non-string workerImage', JSON.stringify({ workerImage: 42 })],
+    ['an empty workerImage', JSON.stringify({ workerImage: '   ' })],
+    ['a non-object document', JSON.stringify(['sofa-worker'])],
+  ])('rejects dispatch with 422 and records no run for %s', async (_what, contents) => {
+    const h = makeHarness();
+    const { dir, project } = await openProject(h.app);
+    writeFileSync(join(dir, 'sofa.json'), contents);
+
+    const res = await dispatch(h.app, project.id);
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain('sofa.json');
+    expect(h.launches).toHaveLength(0);
+    expect(await runs(h.app, project.id)).toHaveLength(0);
+  });
+});
+
 describe('run lifecycle', () => {
   it('tracks each lifecycle state as the Worker progresses to an open PR', async () => {
     const h = makeHarness();
@@ -290,5 +347,142 @@ describe('persistence across restarts', () => {
       state: 'pr_open',
       prUrl: 'https://github.com/davbergen/scratch/pull/12',
     });
+  });
+});
+
+const USAGE: TokenUsage = {
+  inputTokens: 1000,
+  outputTokens: 200,
+  cacheReadTokens: 5000,
+  cacheCreationTokens: 300,
+};
+
+async function usage(app: ReturnType<typeof makeHarness>['app'], projectId: number): Promise<ProjectUsage> {
+  const res = await app.request(`/api/projects/${projectId}/usage`);
+  expect(res.status).toBe(200);
+  return res.json();
+}
+
+describe('quota meter', () => {
+  it('records the usage a succeeded Worker reported and serves per-run plus aggregate views', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+    await dispatch(h.app, project.id);
+    const runId = (await runs(h.app, project.id))[0].id;
+
+    h.emit({ type: 'succeeded', prUrl: 'https://example.com/pr/1', usage: USAGE });
+
+    const report = await usage(h.app, project.id);
+    expect(report.total).toEqual({ ...USAGE, totalTokens: 6500 });
+    expect(report.byRun).toEqual([{ runId, ...USAGE, totalTokens: 6500 }]);
+    expect(report.byDay).toHaveLength(1);
+    expect(report.byDay[0].totalTokens).toBe(6500);
+  });
+
+  it('records usage when the Worker fails after spending tokens', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+    await dispatch(h.app, project.id);
+
+    h.emit({ type: 'failed', reason: 'git push failed', usage: USAGE });
+
+    const report = await usage(h.app, project.id);
+    expect(report.total.totalTokens).toBe(6500);
+  });
+
+  it('records nothing for a terminal event without usage, and ignores stale usage after one', async () => {
+    const h = makeHarness();
+    const { project } = await openProject(h.app);
+    await dispatch(h.app, project.id);
+    h.emit({ type: 'failed', reason: 'docker died' });
+
+    // Stale terminal event after the run already finished must not record.
+    h.emit({ type: 'succeeded', prUrl: 'https://example.com/pr/1', usage: USAGE });
+
+    const report = await usage(h.app, project.id);
+    expect(report.total.totalTokens).toBe(0);
+    expect(report.byRun).toEqual([]);
+    expect(report.byDay).toEqual([]);
+  });
+
+  it('aggregates usage across runs and survives a restart', async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'sofa-usage-db-')), 'sofa.db');
+    const first = makeHarness(openDb(dbPath));
+    const { project } = await openProject(first.app);
+    await dispatch(first.app, project.id, 7);
+    first.emit({ type: 'succeeded', prUrl: 'https://example.com/pr/1', usage: USAGE });
+    await dispatch(first.app, project.id, 9);
+    first.emit({
+      type: 'failed',
+      reason: 'agent made no changes',
+      usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    });
+    first.db.close();
+
+    const second = makeHarness(openDb(dbPath));
+    const report = await usage(second.app, project.id);
+
+    expect(report.total.totalTokens).toBe(6530);
+    expect(report.byRun.map((r) => r.totalTokens)).toEqual([30, 6500]); // newest run first
+  });
+
+  it('404s for an unknown Project', async () => {
+    const h = makeHarness();
+
+    const res = await h.app.request('/api/projects/999/usage');
+
+    expect(res.status).toBe(404);
+  });
+
+  it('records usage an interactive Session reports', async () => {
+    const agent = new FakeAgent([
+      { type: 'assistant_text', text: 'Working…' },
+      { type: 'usage', usage: USAGE },
+    ]);
+    const { github } = fakeGitHub();
+    const app = createApp(openDb(':memory:'), agent, { github, container: fakeContainer().container });
+    const { project } = await openProject(app);
+    const session = await (
+      await app.request(`/api/projects/${project.id}/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Do a thing' }),
+      })
+    ).json();
+
+    // Drain the Session's event stream; recording happens as events stream by.
+    await (await app.request(`/api/sessions/${session.id}/events`)).text();
+
+    const report = await usage(app, project.id);
+    expect(report.total.totalTokens).toBe(6500);
+    expect(report.byRun).toEqual([]); // Session spend is aggregate-only, not a Worker run
+  });
+});
+
+describe('parseOutcomeLine usage passthrough', () => {
+  it('surfaces usage from the Worker outcome line on success and failure', () => {
+    const succeeded = parseOutcomeLine(
+      JSON.stringify({ outcome: 'succeeded', prUrl: 'https://example.com/pr/1', usage: USAGE }),
+      0,
+    );
+    expect(succeeded).toEqual({ type: 'succeeded', prUrl: 'https://example.com/pr/1', usage: USAGE });
+
+    const failed = parseOutcomeLine(JSON.stringify({ outcome: 'failed', reason: 'no changes', usage: USAGE }), 1);
+    expect(failed).toEqual({ type: 'failed', reason: 'no changes', usage: USAGE });
+  });
+
+  it('coerces malformed usage to zeroed counters and tolerates a missing one', () => {
+    const garbled = parseOutcomeLine(
+      JSON.stringify({ outcome: 'failed', reason: 'oops', usage: { inputTokens: 'lots', outputTokens: -3 } }),
+      1,
+    );
+    expect(garbled).toEqual({
+      type: 'failed',
+      reason: 'oops',
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    });
+
+    const absent = parseOutcomeLine(JSON.stringify({ outcome: 'failed', reason: 'oops' }), 1);
+    expect(absent).toEqual({ type: 'failed', reason: 'oops' });
   });
 });
