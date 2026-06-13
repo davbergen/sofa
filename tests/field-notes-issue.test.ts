@@ -21,6 +21,7 @@ function fakeGitHub() {
         url: 'https://github.com/davbergen/scratch/issues/77',
       });
     },
+    ensureLabels: () => Promise.resolve(),
   };
   return { github, created };
 }
@@ -151,6 +152,7 @@ describe('Cut a Field Note Item directly into a ready Issue', () => {
           new Error(`gh issue create failed (exit 1): could not add label: '${READY_LABEL}' not found`),
         );
       },
+      ensureLabels: () => Promise.resolve(),
     };
     const app = makeHarness(github);
     const project = await openProject(app, makeDir());
@@ -171,6 +173,7 @@ describe('Cut a Field Note Item directly into a ready Issue', () => {
       resolveRepo: () => Promise.resolve('davbergen/scratch'),
       listReadyIssues: () => Promise.resolve([]),
       createIssue: () => Promise.reject(new Error('gh not authenticated')),
+      ensureLabels: () => Promise.resolve(),
     };
     const app = makeHarness(github);
     const project = await openProject(app, makeDir());

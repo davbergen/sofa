@@ -74,6 +74,28 @@ export function ghGitHubAdapter(): GitHubAdapter {
       }
       return { number, url };
     },
+
+    async ensureLabels(dir, labels) {
+      // Read what's already there so existing labels are left untouched — we
+      // only create the ones that are missing (no `--force`, no overwrite).
+      const list = await exec('gh', ['label', 'list', '--json', 'name', '--jq', '.[].name'], dir);
+      if (list.code !== 0) {
+        throw new Error(`gh label list failed (exit ${list.code}): ${list.stderr.trim().slice(0, 300)}`);
+      }
+      const existing = new Set(list.stdout.split('\n').map((s) => s.trim()).filter(Boolean));
+      for (const label of labels) {
+        if (existing.has(label)) continue;
+        const create = await exec('gh', ['label', 'create', label], dir);
+        // A concurrent create (or a label added between the list and now) makes
+        // gh exit non-zero with "already exists" — that's the desired end state,
+        // so tolerate it; anything else is a real failure.
+        if (create.code !== 0 && !/already exists/i.test(create.stderr)) {
+          throw new Error(
+            `gh label create ${label} failed (exit ${create.code}): ${create.stderr.trim().slice(0, 300)}`,
+          );
+        }
+      }
+    },
   };
 }
 

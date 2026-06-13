@@ -32,6 +32,13 @@ export interface GitHubAdapter {
   listReadyIssues(dir: string): Promise<ReadyIssue[]>;
   /** Creates an issue in the Project's repository and returns its number and URL. */
   createIssue(dir: string, issue: NewIssue): Promise<CreatedIssue>;
+  /**
+   * Ensures each named label exists in the Project's repository, creating any
+   * that are missing and leaving existing ones untouched. Used to guarantee
+   * Sofa's convention labels (ready-for-agent, prd) are present before filing
+   * Issues or publishing PRDs against a freshly opened repo.
+   */
+  ensureLabels(dir: string, labels: string[]): Promise<void>;
 }
 
 /** Lifecycle phases a running Worker reports before it finishes. */

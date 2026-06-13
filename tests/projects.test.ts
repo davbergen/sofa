@@ -4,11 +4,43 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { openDb } from '../src/server/db';
-import { createApp } from '../src/server/app';
+import { createApp, PRD_LABEL, type AppDeps } from '../src/server/app';
+import { READY_LABEL } from '../src/server/adapters';
 import { FakeAgent } from '../src/server/fake-agent';
+import type { ContainerAdapter, GitHubAdapter } from '../src/server/ports';
 
 function makeApp() {
   return createApp(openDb(':memory:'), new FakeAgent());
+}
+
+const noopContainer: ContainerAdapter = {
+  startWorker() {
+    throw new Error('no Worker should start in these tests');
+  },
+};
+
+/**
+ * Fake GitHub adapter that records the labels it was asked to ensure. The
+ * `ensure` callback lets a test make the call fail to exercise the non-fatal
+ * path.
+ */
+function fakeGitHub(ensure: (dir: string, labels: string[]) => Promise<void> = () => Promise.resolve()) {
+  const ensured: Array<{ dir: string; labels: string[] }> = [];
+  const github: GitHubAdapter = {
+    resolveRepo: () => Promise.resolve('davbergen/scratch'),
+    listReadyIssues: () => Promise.resolve([]),
+    createIssue: () => Promise.resolve({ number: 1, url: 'https://github.com/davbergen/scratch/issues/1' }),
+    ensureLabels(dir, labels) {
+      ensured.push({ dir, labels });
+      return ensure(dir, labels);
+    },
+  };
+  return { github, ensured };
+}
+
+function makeAppWith(github: GitHubAdapter) {
+  const deps: AppDeps = { github, container: noopContainer };
+  return createApp(openDb(':memory:'), new FakeAgent(), deps);
 }
 
 function makeDir(prefix = 'sofa-test-') {
@@ -84,6 +116,31 @@ describe('opening a Project', () => {
     });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('ensuring convention labels on open', () => {
+  it('ensures the ready-for-agent and prd labels exist when a Project opens', async () => {
+    const { github, ensured } = fakeGitHub();
+    const app = makeAppWith(github);
+    const dir = makeDir();
+
+    const res = await open(app, dir);
+
+    expect(res.status).toBe(201);
+    expect(ensured).toEqual([{ dir, labels: [READY_LABEL, PRD_LABEL] }]);
+  });
+
+  it('opens the Project even when ensuring labels fails (non-fatal)', async () => {
+    const { github, ensured } = fakeGitHub(() => Promise.reject(new Error('gh not authenticated')));
+    const app = makeAppWith(github);
+    const dir = makeDir();
+
+    const res = await open(app, dir);
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).dir).toBe(dir);
+    expect(ensured).toHaveLength(1);
   });
 });
 

@@ -149,6 +149,21 @@ export function createApp(
       return c.json({ error: `not a directory: ${abs}` }, 400);
     }
 
+    // A freshly opened repo may lack Sofa's convention labels, which filing
+    // Issues, publishing PRDs, and listing ready work all depend on. Ensure
+    // they exist on open. This is best-effort: a repo without a GitHub remote
+    // (or an unauthenticated gh) must still open, so a failure is a warning,
+    // not a block.
+    if (deps?.github) {
+      try {
+        await deps.github.ensureLabels(abs, [READY_LABEL, PRD_LABEL]);
+      } catch (err) {
+        console.warn(
+          `could not ensure convention labels for ${abs}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const existing = db
       .prepare('SELECT id, dir, name, opened_at FROM open_projects WHERE dir = ?')
       .get(abs) as unknown as ProjectRow | undefined;
