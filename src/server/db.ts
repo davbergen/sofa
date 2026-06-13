@@ -68,6 +68,10 @@ const MIGRATIONS: string[] = [
     position INTEGER NOT NULL,
     text TEXT NOT NULL
   )`,
+  // Field Note Item acted status: the action taken and the Session it spawned
+  // (nullable FK — null until the Item is first acted on).
+  `ALTER TABLE field_note_items ADD COLUMN acted_action TEXT;
+   ALTER TABLE field_note_items ADD COLUMN session_id INTEGER REFERENCES sessions(id)`,
 ];
 
 export function openDb(path: string): DatabaseSync {

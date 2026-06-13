@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState, type DragEvent } from 'react';
 interface FieldNoteItem {
   id: number;
   text: string;
+  actedAction: 'grill' | 'implement' | null;
+  sessionId: number | null;
 }
 
 interface FieldNotes {
@@ -148,8 +150,19 @@ function NoteIcon() {
   );
 }
 
+const ACTION_LABELS: Record<'grill' | 'implement', string> = {
+  grill: 'Grilled',
+  implement: 'Implemented',
+};
+
 /** The factory floor for one Project: ready Issues, Dispatch, run records, usage. */
-export function ProjectDashboard({ projectId }: { projectId: number }) {
+export function ProjectDashboard({
+  projectId,
+  onFocusSession,
+}: {
+  projectId: number;
+  onFocusSession?: (sessionId: number, prompt: string) => void;
+}) {
   const [issues, setIssues] = useState<ReadyIssue[] | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -159,6 +172,7 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [notes, setNotes] = useState<FieldNotes | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [actingItems, setActingItems] = useState<Record<number, boolean>>({});
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -223,6 +237,29 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
       const body = await res.json().catch(() => null);
       setNotesError(body?.error ?? `reading the note failed (${res.status})`);
     }
+  }
+
+  async function actOnItem(item: FieldNoteItem, action: 'grill' | 'implement') {
+    setActingItems((prev) => ({ ...prev, [item.id]: true }));
+    setNotesError(null);
+    const res = await fetch(`/api/projects/${projectId}/field-notes/items/${item.id}/act`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    setActingItems((prev) => ({ ...prev, [item.id]: false }));
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setNotesError(body?.error ?? `action failed (${res.status})`);
+      return;
+    }
+    const { session, item: updatedItem } = await res.json();
+    setNotes((prev) =>
+      prev
+        ? { ...prev, items: prev.items.map((i) => (i.id === item.id ? updatedItem : i)) }
+        : prev,
+    );
+    onFocusSession?.(session.id, session.prompt);
   }
 
   // Poll while any Worker is active so lifecycle states update live.
@@ -300,13 +337,49 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
             </div>
           ) : (
             <div className="cz-fn">
-              {notes.items.map((item) => (
-                <div className="cz-issue" key={item.id}>
-                  <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
-                    {item.text}
+              {notes.items.map((item) => {
+                const acting = actingItems[item.id] ?? false;
+                const acted = item.actedAction !== null;
+                return (
+                  <div className={`cz-issue${acted ? ' acted' : ''}`} key={item.id}>
+                    <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
+                      {item.text}
+                    </div>
+                    {acted && item.sessionId !== null && (
+                      <div className="cz-fn-acted">
+                        <span className="cz-fn-acted-label">
+                          {ACTION_LABELS[item.actedAction!]} →
+                        </span>
+                        <button
+                          type="button"
+                          className="cz-fn-session-link"
+                          onClick={() => onFocusSession?.(item.sessionId!, item.text)}
+                        >
+                          Session #{item.sessionId}
+                        </button>
+                      </div>
+                    )}
+                    <div className="cz-fn-acts">
+                      <button
+                        type="button"
+                        className="cz-fn-act grill"
+                        disabled={acting}
+                        onClick={() => void actOnItem(item, 'grill')}
+                      >
+                        Grill
+                      </button>
+                      <button
+                        type="button"
+                        className="cz-fn-act implement"
+                        disabled={acting}
+                        onClick={() => void actOnItem(item, 'implement')}
+                      >
+                        Implement
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

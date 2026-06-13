@@ -452,6 +452,72 @@ body {
   cursor: not-allowed;
 }
 
+/* ---- Field Note Item action buttons and acted state ------------------- */
+.cz-fn-acts {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.cz-fn-act {
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 9px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--tx2);
+}
+.cz-fn-act:hover:not(:disabled) {
+  border-color: var(--seam);
+  color: var(--cream);
+}
+.cz-fn-act.grill:hover:not(:disabled) {
+  color: var(--tan);
+  border-color: var(--tan-d);
+}
+.cz-fn-act.implement:hover:not(:disabled) {
+  color: var(--sage);
+  border-color: var(--sage-d);
+}
+.cz-fn-act:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.cz-issue.acted .txt {
+  text-decoration: line-through;
+  color: var(--tx3);
+}
+.cz-fn-acted {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+}
+.cz-fn-acted-label {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+  color: var(--tx3);
+  text-transform: uppercase;
+}
+.cz-fn-session-link {
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 11px;
+  color: var(--sage);
+  background: rgba(163, 173, 140, 0.1);
+  border: 1.5px solid rgba(163, 173, 140, 0.2);
+  border-radius: 7px;
+  padding: 2px 9px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.cz-fn-session-link:hover {
+  background: rgba(163, 173, 140, 0.18);
+  border-color: var(--sage-d);
+}
+
 /* ---- Field Notes drop target + parsed Items --------------------------- */
 .cz-drop {
   border: 2px dashed var(--seam);

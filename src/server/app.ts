@@ -236,6 +236,54 @@ export function createApp(
     return c.json(fieldNotes.replaceForProject(projectId, parseFieldNotes(body.text)), 201);
   });
 
+  // Act on a Field Note Item: start a Session with the Item's text as prompt.
+  // 'grill' loads the grill-with-docs skill; 'implement' uses no skill.
+  // The spawned Session id is stored on the Item so the link survives restarts.
+  app.post('/api/projects/:projectId/field-notes/items/:itemId/act', async (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const itemId = Number(c.req.param('itemId'));
+
+    const project = db
+      .prepare('SELECT id, dir, name, opened_at FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as ProjectRow | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+
+    // Verify the item exists and belongs to this project.
+    const itemCheck = db
+      .prepare(
+        `SELECT fni.id, fni.text
+         FROM field_note_items fni
+         JOIN field_notes fn ON fn.id = fni.note_id
+         WHERE fni.id = ? AND fn.project_id = ?`,
+      )
+      .get(itemId, projectId) as unknown as { id: number; text: string } | undefined;
+    if (!itemCheck) {
+      return c.json(
+        { error: `no Field Note Item with id ${itemId} for Project ${projectId}` },
+        404,
+      );
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const action = body?.action;
+    if (action !== 'grill' && action !== 'implement') {
+      return c.json({ error: "action must be 'grill' or 'implement'" }, 400);
+    }
+
+    const skill = action === 'grill' ? 'grill-with-docs' : null;
+    const session = store.create(projectId, itemCheck.text, skill);
+    runSession(projectId, session.id, {
+      prompt: itemCheck.text,
+      cwd: project.dir,
+      ...(skill ? { skill } : {}),
+    });
+
+    const item = fieldNotes.actItem(itemId, action, session.id);
+    return c.json({ session, item }, 201);
+  });
+
   // The persisted transcript: survives restarts, unlike the live event stream.
   app.get('/api/sessions/:sessionId/transcript', (c) => {
     const sessionId = Number(c.req.param('sessionId'));

@@ -252,6 +252,7 @@ function ProjectCard({
   onToggleDashboard,
   onStart,
   onLoadSessions,
+  onFocusSession,
 }: {
   project: Project;
   skills: Skill[];
@@ -263,6 +264,7 @@ function ProjectCard({
   onToggleDashboard: () => void;
   onStart: () => void;
   onLoadSessions: () => void;
+  onFocusSession: (sessionId: number, prompt: string) => void;
 }) {
   return (
     <div className="cz-project">
@@ -311,7 +313,9 @@ function ProjectCard({
         </button>
       </div>
 
-      {dashboardOpen && <ProjectDashboard projectId={project.id} />}
+      {dashboardOpen && (
+        <ProjectDashboard projectId={project.id} onFocusSession={onFocusSession} />
+      )}
     </div>
   );
 }
@@ -507,6 +511,37 @@ export function App() {
     setPastSessions(await res.json());
   }
 
+  /**
+   * Focuses an existing Session: loads its transcript and, if still running,
+   * attaches the live event stream. Used by Field Note Item actions and their
+   * session links so both the initial act and later re-visits go through one path.
+   */
+  async function focusSession(project: Project, sessionId: number, prompt: string) {
+    setError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/transcript`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `failed to load Session transcript (${res.status})`);
+      return;
+    }
+    const { session: persisted, events } = (await res.json()) as {
+      session: PastSession;
+      events: TranscriptEvent[];
+    };
+    sourceRef.current?.close();
+    setSession({ id: sessionId, projectName: project.name, prompt });
+    setTranscript((events as TranscriptEvent[]).map(toEntry));
+    setPending([]);
+    setPrdDraft(null);
+    setPrdPublished(null);
+    if (persisted.status === 'running') {
+      setStatus('streaming');
+      attachStream(sessionId);
+    } else {
+      setStatus(persisted.status === 'error' ? 'error' : 'done');
+    }
+  }
+
   /** Shows the persisted transcript of a past Session. */
   async function viewTranscript(past: PastSession, projectName: string) {
     setError(null);
@@ -599,6 +634,7 @@ export function App() {
             onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
             onStart={() => void startSession(p)}
             onLoadSessions={() => void loadSessions(p)}
+            onFocusSession={(sessionId, prompt) => void focusSession(p, sessionId, prompt)}
           />
         ))
       )}
