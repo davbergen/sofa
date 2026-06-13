@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type DragEvent } from 'react';
+
+interface FieldNoteItem {
+  id: number;
+  text: string;
+}
+
+interface FieldNotes {
+  hasNote: boolean;
+  items: FieldNoteItem[];
+}
 
 interface ReadyIssue {
   number: number;
@@ -116,6 +126,9 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [usage, setUsage] = useState<ProjectUsage | null>(null);
   const [killError, setKillError] = useState<string | null>(null);
+  const [notes, setNotes] = useState<FieldNotes | null>(null);
+  const [notesError, setNotesError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -145,6 +158,42 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
       cancelled = true;
     };
   }, [projectId]);
+
+  // Load any persisted Field Notes for this Project (they survive restarts and
+  // show up in a fresh browser).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/projects/${projectId}/field-notes`);
+      if (cancelled || !res.ok) return;
+      setNotes(await res.json());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // Drop a `.txt` note onto the dashboard: read its text in the browser, send it
+  // to Sofa, and show the parsed Items (replacing any prior note).
+  async function onDropNote(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragging(false);
+    setNotesError(null);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const text = await file.text();
+    const res = await fetch(`/api/projects/${projectId}/field-notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (res.ok) {
+      setNotes(await res.json());
+    } else {
+      const body = await res.json().catch(() => null);
+      setNotesError(body?.error ?? `reading the note failed (${res.status})`);
+    }
+  }
 
   // Poll while any Worker is active so lifecycle states update live.
   const anyActive = runs.some((r) => ACTIVE.includes(r.state));
@@ -183,6 +232,43 @@ export function ProjectDashboard({ projectId }: { projectId: number }) {
 
   return (
     <section style={{ margin: '0.5rem 0 1rem', paddingLeft: '1rem', borderLeft: '3px solid #ddd' }}>
+      <h3 style={{ margin: '0.5rem 0' }}>Field Notes</h3>
+      {notesError && <p role="alert" style={{ color: 'crimson' }}>{notesError}</p>}
+      <div
+        aria-label="Field Notes drop target"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => void onDropNote(e)}
+        style={{
+          border: `2px dashed ${dragging ? '#0a6640' : '#bbb'}`,
+          background: dragging ? '#e6f5ee' : 'transparent',
+          borderRadius: 6,
+          padding: '0.75rem',
+          margin: '0.25rem 0 0.75rem',
+        }}
+      >
+        {!notes || !notes.hasNote ? (
+          <p style={{ margin: 0, color: '#666' }}>
+            Drag a <code>.txt</code> note here to capture the changes you want made.
+          </p>
+        ) : notes.items.length === 0 ? (
+          <p style={{ margin: 0, color: '#666' }}>
+            That note had no numbered items. Drop another <code>.txt</code> to try again.
+          </p>
+        ) : (
+          <ol style={{ margin: 0, paddingLeft: '1.25rem' }}>
+            {notes.items.map((item) => (
+              <li key={item.id} style={{ margin: '0.25rem 0', whiteSpace: 'pre-wrap' }}>
+                {item.text}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
       <h3 style={{ margin: '0.5rem 0' }}>Ready Issues</h3>
       {issuesError && <p role="alert" style={{ color: 'crimson' }}>{issuesError}</p>}
       {issues === null && !issuesError && <p>Loading Issues…</p>}
