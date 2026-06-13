@@ -8,8 +8,13 @@ interface Project {
   openedAt: string;
 }
 
+interface Skill {
+  name: string;
+  description: string;
+}
+
 interface TranscriptEntry {
-  kind: 'assistant' | 'user' | 'error' | 'resolution';
+  kind: 'assistant' | 'user' | 'error' | 'resolution' | 'doc';
   text: string;
 }
 
@@ -255,6 +260,8 @@ export function App() {
   const [dir, setDir] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skill, setSkill] = useState('');
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [pending, setPending] = useState<PendingInteraction[]>([]);
@@ -272,6 +279,11 @@ export function App() {
 
   useEffect(() => {
     void refresh();
+    // Skills from the user's ~/.claude setup, loadable into a Session.
+    void fetch('/api/skills')
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setSkills)
+      .catch(() => setSkills([]));
     return () => sourceRef.current?.close();
   }, []);
 
@@ -339,7 +351,7 @@ export function App() {
     const res = await fetch(`/api/projects/${project.id}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, ...(skill ? { skill } : {}) }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -369,6 +381,11 @@ export function App() {
     source.addEventListener('agent_error', (e) => {
       const { message } = JSON.parse((e as MessageEvent).data);
       setTranscript((t) => [...t, { kind: 'error', text: message }]);
+    });
+    // Doc writes (CONTEXT.md, docs/adr) surface as they happen.
+    source.addEventListener('file_write', (e) => {
+      const { path } = JSON.parse((e as MessageEvent).data);
+      setTranscript((t) => [...t, { kind: 'doc', text: `Updated ${path}` }]);
     });
     source.addEventListener('question', (e) => {
       const event = JSON.parse((e as MessageEvent).data);
@@ -495,6 +512,23 @@ export function App() {
             onChange={(e) => setPrompt(e.target.value)}
             style={{ width: '100%', padding: '0.5rem', boxSizing: 'border-box' }}
           />
+          {skills.length > 0 && (
+            <label style={{ display: 'block', margin: '0.5rem 0' }}>
+              Skill:{' '}
+              <select
+                aria-label="Session skill"
+                value={skill}
+                onChange={(e) => setSkill(e.target.value)}
+              >
+                <option value="">(no skill)</option>
+                {skills.map((s) => (
+                  <option key={s.name} value={s.name} title={s.description}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <ul>
             {projects.map((p) => (
               <li key={p.id} style={{ marginBottom: '0.25rem' }}>
@@ -570,7 +604,15 @@ export function App() {
                             ? { color: '#666', fontStyle: 'italic' }
                             : entry.kind === 'user'
                               ? { fontWeight: 600 }
-                              : undefined
+                              : entry.kind === 'doc'
+                                ? {
+                                    color: '#0a6640',
+                                    background: '#e6f5ee',
+                                    borderLeft: '3px solid #0a6640',
+                                    padding: '0.25rem 0.5rem',
+                                    fontFamily: 'monospace',
+                                  }
+                                : undefined
                       }
                     >
                       {entry.kind === 'user' ? `You: ${entry.text}` : entry.text}

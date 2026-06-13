@@ -7,6 +7,7 @@ import type {
   QuestionOption,
 } from './agent.js';
 import { SessionRun } from './sessions.js';
+import { docWriteFromToolUse } from './doc-writes.js';
 
 export interface SdkAgentOptions {
   /** Cap the number of agentic turns (useful for smoke tests). */
@@ -44,7 +45,7 @@ interface AskUserQuestionInput {
 export class SdkAgent implements Agent {
   constructor(private readonly options: SdkAgentOptions = {}) {}
 
-  run({ prompt, cwd, resume }: AgentRunInput): AgentSession {
+  run({ prompt, cwd, skill, resume }: AgentRunInput): AgentSession {
     // SessionRun doubles as a push-based event buffer here, merging events
     // from the SDK message loop and the canUseTool callback into one stream.
     const out = new SessionRun();
@@ -86,7 +87,16 @@ export class SdkAgent implements Agent {
 
     const messages = query({
       prompt,
-      options: { cwd, maxTurns: this.options.maxTurns, canUseTool, resume },
+      options: {
+        cwd,
+        maxTurns: this.options.maxTurns,
+        canUseTool,
+        resume,
+        // The SDK discovers skills from the same ~/.claude setup the CLI
+        // uses (settingSources defaults to all sources); naming one here
+        // enables it and loads its frontmatter into the system prompt.
+        ...(skill ? { skills: [skill] } : {}),
+      },
     });
 
     void (async () => {
@@ -98,13 +108,29 @@ export class SdkAgent implements Agent {
             for (const block of message.message.content) {
               if (block.type === 'text' && block.text) {
                 out.push({ type: 'assistant_text', text: block.text });
+              } else if (block.type === 'tool_use') {
+                // Writes to CONTEXT.md / docs/adr surface as file_write events.
+                const docWrite = docWriteFromToolUse(block.name, block.input);
+                if (docWrite) out.push(docWrite);
               }
             }
-          } else if (message.type === 'result' && message.subtype !== 'success') {
+          } else if (message.type === 'result') {
+            // Surface the SDK's usage metadata for the quota meter.
             out.push({
-              type: 'agent_error',
-              message: `Agent run failed (${message.subtype})${message.errors.length ? `: ${message.errors.join('; ')}` : ''}`,
+              type: 'usage',
+              usage: {
+                inputTokens: message.usage.input_tokens ?? 0,
+                outputTokens: message.usage.output_tokens ?? 0,
+                cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
+                cacheCreationTokens: message.usage.cache_creation_input_tokens ?? 0,
+              },
             });
+            if (message.subtype !== 'success') {
+              out.push({
+                type: 'agent_error',
+                message: `Agent run failed (${message.subtype})${message.errors.length ? `: ${message.errors.join('; ')}` : ''}`,
+              });
+            }
           }
         }
       } catch (err) {

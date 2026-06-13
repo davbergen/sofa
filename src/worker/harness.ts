@@ -22,9 +22,24 @@ export interface CommandRunner {
   ): Promise<CommandResult>;
 }
 
-/** The agent that implements the Issue inside the cloned repository. */
+/**
+ * Token usage the agent reported for its run, mirrored from Agent SDK
+ * metadata. Field names are part of the Worker's JSON outcome contract
+ * (the docker adapter parses them on the server side).
+ */
+export interface AgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+/**
+ * The agent that implements the Issue inside the cloned repository. May
+ * report its token usage; returning nothing means usage is unknown.
+ */
 export interface Agent {
-  implementIssue(opts: { cwd: string; prompt: string }): Promise<void>;
+  implementIssue(opts: { cwd: string; prompt: string }): Promise<AgentUsage | void>;
 }
 
 export interface WorkerEnv {
@@ -44,11 +59,15 @@ export interface WorkerSuccess {
   issue: number;
   branch: string;
   prUrl: string;
+  /** Token usage the agent reported, when available. */
+  usage?: AgentUsage;
 }
 
 export interface WorkerFailure {
   outcome: 'failed';
   reason: string;
+  /** Token usage the agent reported before the failure, when available. */
+  usage?: AgentUsage;
 }
 
 export type WorkerOutcome = WorkerSuccess | WorkerFailure;
@@ -170,11 +189,16 @@ export async function runWorker(
     'Issue body:',
     issueBody,
   ].join('\n');
+  let usage: AgentUsage | undefined;
   try {
-    await agent.implementIssue({ cwd: workDir, prompt });
+    usage = (await agent.implementIssue({ cwd: workDir, prompt })) as AgentUsage | undefined;
   } catch (err) {
     return fail(`agent failed: ${err instanceof Error ? err.message : String(err)}`, env.githubToken);
   }
+  // Tokens were spent even if a later step fails, so every outcome past this
+  // point carries the agent's reported usage (when it reported any).
+  const withUsage = <T extends WorkerOutcome>(outcome: T): T =>
+    usage ? { ...outcome, usage } : outcome;
 
   // 5. Commit anything the agent left uncommitted, then require real work.
   const status = await git(['status', '--porcelain']);
@@ -182,20 +206,20 @@ export async function runWorker(
     await git(['add', '-A']);
     const commit = await git(['commit', '-m', `Implement Issue #${env.issue}: ${issueTitle}`]);
     if (commit.code !== 0) {
-      return fail(describe('git commit', commit), env.githubToken);
+      return withUsage(fail(describe('git commit', commit), env.githubToken));
     }
   }
   const ahead = await git(['rev-list', '--count', '@{upstream}..HEAD']);
   const aheadByBranch = ahead.code === 0 ? ahead : await git(['rev-list', '--count', `origin/HEAD..HEAD`]);
   if (aheadByBranch.code === 0 && aheadByBranch.stdout.trim() === '0') {
-    return fail(`agent made no changes for Issue #${env.issue}`, env.githubToken);
+    return withUsage(fail(`agent made no changes for Issue #${env.issue}`, env.githubToken));
   }
 
   // 6. Output leaves the Worker only as a pushed branch...
   log(`pushing ${branch}`);
   const push = await git(['push', '-u', 'origin', branch]);
   if (push.code !== 0) {
-    return fail(describe('git push', push), env.githubToken);
+    return withUsage(fail(describe('git push', push), env.githubToken));
   }
 
   // 7. ...and a pull request.
@@ -211,10 +235,10 @@ export async function runWorker(
   }
   const pr = await gh(prArgs);
   if (pr.code !== 0) {
-    return fail(describe('gh pr create', pr), env.githubToken);
+    return withUsage(fail(describe('gh pr create', pr), env.githubToken));
   }
   const prUrl = pr.stdout.trim().split('\n').pop() ?? '';
 
   log(`opened ${prUrl}`);
-  return { outcome: 'succeeded', repo: env.repo, issue: env.issue, branch, prUrl };
+  return withUsage({ outcome: 'succeeded', repo: env.repo, issue: env.issue, branch, prUrl });
 }
