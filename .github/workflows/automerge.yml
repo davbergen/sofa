@@ -24,6 +24,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write
     steps:
       # Check out the live base branch (master at job-run time), not the PR's
       # precomputed merge ref, so a PR that merged while we were queued is
@@ -59,3 +60,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh pr merge "${{ github.event.pull_request.number }}" --squash --delete-branch
+
+      # Close the linked issue deterministically instead of relying on a `Closes #N`
+      # keyword in the PR body. The body-keyword path silently fails to auto-close
+      # whenever the link wasn't registered — a PR stacked on a non-master base, a
+      # run that dropped `--body`, or a misformatted number — leaving merged work
+      # with an open issue. The branch name (`issue-<n>-<slug>`) is the reliable
+      # source of the issue number, so derive it here and close from the same job
+      # that did the merge. Best-effort: a non-issue branch or already-closed issue
+      # must not fail the run.
+      - name: Close the linked issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          n="$(echo "${{ github.event.pull_request.head.ref }}" | sed -nE 's/^issue-([0-9]+)-.*/\1/p')"
+          if [ -n "$n" ]; then
+            echo "Closing linked issue #$n"
+            gh issue close "$n" --reason completed --comment "Closed by merged PR #${{ github.event.pull_request.number }}." || true
+          else
+            echo "Head ref '${{ github.event.pull_request.head.ref }}' is not an issue-<n>-* branch; nothing to close."
+          fi
