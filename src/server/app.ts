@@ -10,6 +10,7 @@ import { SessionStore } from './session-store.js';
 import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
 import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
 import { readSofaConfig, SofaConfigError } from './sofa-config.js';
+import { projectUsage, recordRunUsage, recordSessionUsage, withUsageRecording } from './usage.js';
 
 export interface Project {
   id: number;
@@ -82,9 +83,16 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
   const workerHandles = new Map<number, WorkerHandle>();
   const store = new SessionStore(db);
 
-  /** Runs one Agent turn for a Session, persisting events as they stream. */
-  function runSession(sessionId: number, input: AgentRunInput): void {
-    sessions.start(sessionId, agent.run(input), {
+  /**
+   * Runs one Agent turn for a Session, persisting events as they stream.
+   * The quota meter taps the event stream: usage reports are persisted as
+   * they stream by; Agents that emit none simply record nothing.
+   */
+  function runSession(projectId: number, sessionId: number, input: AgentRunInput): void {
+    const agentSession = withUsageRecording(agent.run(input), (usage) =>
+      recordSessionUsage(db, projectId, sessionId, usage),
+    );
+    sessions.start(sessionId, agentSession, {
       onEvent: (event) => store.appendEvent(sessionId, event),
       onFinish: (errored) => store.setStatus(sessionId, errored ? 'error' : 'done'),
     });
@@ -150,7 +158,7 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     }
 
     const session = store.create(projectId, prompt);
-    runSession(session.id, { prompt, cwd: project.dir });
+    runSession(projectId, session.id, { prompt, cwd: project.dir });
     return c.json(session, 201);
   });
 
@@ -199,7 +207,7 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
       .prepare('SELECT dir FROM open_projects WHERE id = ?')
       .get(session.projectId) as unknown as { dir: string };
     store.setStatus(sessionId, 'running');
-    runSession(sessionId, { prompt, cwd: project.dir, resume: session.agentSessionId });
+    runSession(session.projectId, sessionId, { prompt, cwd: project.dir, resume: session.agentSessionId });
     return c.json(store.get(sessionId));
   });
 
@@ -277,6 +285,15 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
     } catch (err) {
       return c.json({ error: `listing ready Issues failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
     }
+  });
+
+  // The quota meter: per-run usage plus aggregates over time for one Project.
+  app.get('/api/projects/:id/usage', (c) => {
+    const project = getProject(c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'no such Project' }, 404);
+    }
+    return c.json(projectUsage(db, project.id));
   });
 
   app.get('/api/projects/:id/runs', (c) => {
@@ -392,6 +409,11 @@ export function createApp(db: DatabaseSync, agent: Agent, deps?: AppDeps): Hono 
         update.failureReason ?? null,
         runId,
       );
+      // Quota meter: terminal events may carry the run's token usage. Stale
+      // events were already filtered above, so a run records at most once.
+      if ((event.type === 'succeeded' || event.type === 'failed') && event.usage) {
+        recordRunUsage(db, project.id, runId, event.usage);
+      }
       if (!isActive(update.state)) {
         workerHandles.delete(runId);
       }
