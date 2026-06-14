@@ -1387,3 +1387,382 @@ body {
   color: var(--tx3);
   font-size: 13.5px;
 }
+
+/* ---- inline Session Terminal (ADR 0008) ------------------------------- *
+ * A live interactive Session morphs its launching Project card in place: the
+ * card's live phase is `[ Session Terminal (flex 1.62) | rail (344px) ]`. The
+ * terminal-surface tokens (`--term-*`, `--tag-*`, `--ask-*`, traffic lights)
+ * are defined once at the top of this file. */
+
+/* Other open cards stay on screen but recede while a Session is live. */
+.cz-project.receded {
+  opacity: 0.5;
+  filter: saturate(0.75);
+  transition: opacity 0.3s ease;
+}
+
+/* live-phase header chip — "Session #n" with a pulsing sage dot */
+.cz-livechip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tan);
+  background: rgba(219, 169, 108, 0.1);
+  border: 1px solid #6b4f30;
+  border-radius: 99px;
+  padding: 7px 14px;
+}
+.cz-livechip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sage);
+  box-shadow: 0 0 9px var(--sage);
+  animation: cz-pulse 1.8s infinite;
+}
+
+/* live layout: terminal column + docked dashboard rail */
+.cz-live {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  min-height: 0;
+}
+.cz-term-col {
+  flex: 1.62;
+  min-width: 0;
+  animation: cz-grow 0.42s cubic-bezier(0.5, 0.05, 0.2, 1);
+  transform-origin: top left;
+}
+.cz-rail {
+  flex: 0 0 344px;
+  width: 344px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  animation: cz-slide 0.5s ease 0.06s both;
+}
+.cz-rail .cz-grid {
+  /* The dashboard grid collapses to a single column in the narrow rail. */
+  grid-template-columns: 1fr;
+}
+.cz-rail .cz-card.tall {
+  grid-row: auto;
+}
+.cz-rail .cz-prd {
+  width: 100%;
+}
+@media (max-width: 900px) {
+  .cz-live {
+    flex-direction: column;
+  }
+  .cz-rail {
+    flex: auto;
+    width: auto;
+    align-self: stretch;
+  }
+}
+
+@keyframes cz-grow {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cz-slide {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cz-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes cz-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* the terminal frame */
+.cz-term {
+  display: flex;
+  flex-direction: column;
+  height: clamp(440px, 72vh, 860px);
+  background: var(--term-bg);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--line);
+  font-family: 'JetBrains Mono', 'Spline Sans Mono', ui-monospace, monospace;
+  font-size: 13.5px;
+}
+
+/* title bar */
+.cz-term-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 16px;
+  background: var(--term-titlebar);
+  border-bottom: 1px solid #2f251d;
+}
+.cz-term-bar .lights {
+  display: flex;
+  gap: 7px;
+}
+.cz-term-bar .lights span {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+}
+.cz-term-bar .lights .r {
+  background: var(--traffic-red);
+}
+.cz-term-bar .lights .y {
+  background: var(--traffic-yellow);
+}
+.cz-term-bar .lights .g {
+  background: var(--traffic-green);
+}
+.cz-term-bar .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tan-d);
+}
+.cz-term-bar .brand svg {
+  color: var(--tan);
+}
+.cz-term-bar .meta {
+  color: var(--tx4);
+  font-size: 12px;
+}
+.cz-term-bar .live {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tag-done);
+}
+.cz-term-bar .live .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tag-done);
+  box-shadow: 0 0 8px var(--tag-done);
+  animation: cz-pulse 1.8s infinite;
+}
+.cz-term-bar .live.still .dot {
+  animation: none;
+}
+.cz-term-end {
+  background: #2a2018;
+  border: 1px solid #463729;
+  color: var(--tx);
+  border-radius: 8px;
+  padding: 7px 13px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.cz-term-end:hover {
+  color: var(--cream);
+  border-color: var(--seam);
+}
+
+/* scrolling body */
+.cz-term-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 8px 16px 0;
+  background: var(--term-screen);
+}
+.cz-term-echo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 14px 10px;
+  border-bottom: 1px solid #241c15;
+  margin-bottom: 8px;
+}
+.cz-term-echo .user {
+  color: var(--sage-d);
+}
+.cz-term-echo .path {
+  color: var(--tx4);
+  font-size: 12px;
+}
+.cz-term-echo .caret {
+  color: var(--tan);
+}
+.cz-term-echo .cmd {
+  color: var(--cream);
+}
+.cz-term-echo .arg {
+  color: var(--tag-read);
+}
+
+/* tagged log lines */
+.cz-term-line {
+  display: flex;
+  gap: 14px;
+  padding: 3px 14px;
+  align-items: baseline;
+  line-height: 1.6;
+}
+.cz-term-line .tag {
+  width: 54px;
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--tx3);
+}
+.cz-term-line .tx {
+  flex: 1;
+  min-width: 0;
+  color: var(--tx);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cz-term-line.sys .tx {
+  color: var(--tx3);
+  font-style: italic;
+}
+.cz-term-line.t-boot .tag {
+  color: var(--tag-boot);
+}
+.cz-term-line.t-note .tag {
+  color: var(--tag-note);
+}
+.cz-term-line.t-note .tx {
+  color: var(--cream);
+}
+.cz-term-line.t-edit .tag {
+  color: var(--tag-write);
+}
+.cz-term-line.t-you .tag {
+  color: var(--tag-you);
+}
+.cz-term-line.t-done .tag,
+.cz-term-line.t-done .tx {
+  color: var(--tag-done);
+}
+.cz-term-line.t-err .tag,
+.cz-term-line.t-err .tx {
+  color: var(--rose);
+}
+
+/* blinking block cursor — shown only while streaming */
+.cz-term-cursor {
+  display: inline-block;
+  width: 9px;
+  height: 16px;
+  margin: 8px 14px;
+  background: var(--tan);
+  vertical-align: -3px;
+  animation: cz-blink 1.05s infinite;
+}
+
+/* the structured ASK block (restyled QuestionForm) */
+.cz-term-ask {
+  margin: 6px 14px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: var(--ask-bg);
+  border-left: 2px solid var(--ask-rail);
+}
+.cz-term-ask .ask-mark {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--ask-rail);
+  margin-bottom: 6px;
+}
+.cz-term-ask .q {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cream);
+}
+.cz-term-ask label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--tx);
+}
+.cz-term-ask label em {
+  color: var(--sage);
+  font-style: normal;
+}
+.cz-term-ask label small {
+  color: var(--tx3);
+}
+.cz-term-ask .cz-actions {
+  margin-top: 8px;
+}
+
+/* free-text reply row */
+.cz-term-input {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 16px;
+  background: var(--term-screen);
+  border-top: 1px solid #2f251d;
+}
+.cz-term-input .user {
+  color: var(--sage-d);
+}
+.cz-term-input .caret {
+  color: var(--tan);
+}
+.cz-term-input input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--cream);
+  font-family: inherit;
+  font-size: 13.5px;
+  caret-color: var(--tan);
+}
+.cz-term-input input::placeholder {
+  color: var(--tx4);
+}
+.cz-term-input input:disabled {
+  cursor: not-allowed;
+}
+.cz-term-input .hint {
+  flex: 0 0 auto;
+  color: var(--tx4);
+  font-size: 11px;
+}
