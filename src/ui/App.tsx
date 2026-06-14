@@ -571,6 +571,7 @@ function SessionRail({
         >
           <ProjectDashboard
             projectId={projectId}
+            hostBusy
             onStartSession={onStartSession}
             onViewSession={onViewSession}
           />
@@ -762,6 +763,7 @@ function ProjectCard({
   skill,
   dashboardOpen,
   liveSession,
+  hostBusy,
   receded,
   onPromptChange,
   onSkillChange,
@@ -777,6 +779,8 @@ function ProjectCard({
   dashboardOpen: boolean;
   /** Set when a live Session belongs to this card — drives the morph to the live phase. */
   liveSession: LiveSession | null;
+  /** True when an interactive Session is live anywhere — locks Process Notes. */
+  hostBusy: boolean;
   /** Another card is hosting the live Session; recede this one but keep it visible. */
   receded: boolean;
   onPromptChange: (value: string) => void;
@@ -869,6 +873,7 @@ function ProjectCard({
           <div className="cz-rail">
             <ProjectDashboard
               projectId={project.id}
+              hostBusy={hostBusy}
               onStartSession={onStartSession}
               onViewSession={onViewSession}
             />
@@ -975,6 +980,7 @@ function ProjectCard({
           {dashboardOpen && (
             <ProjectDashboard
               projectId={project.id}
+              hostBusy={hostBusy}
               onStartSession={onStartSession}
               onViewSession={onViewSession}
             />
@@ -1593,6 +1599,7 @@ export function App() {
             skill={skillByProject[activeProject.id] ?? ''}
             dashboardOpen={!hiddenDashboards[activeProject.id]}
             liveSession={activeLive}
+            hostBusy={session !== null}
             receded={session !== null && session.projectId !== activeProject.id}
             onPromptChange={(value) =>
               setPrompts((prev) => ({ ...prev, [activeProject.id]: value }))

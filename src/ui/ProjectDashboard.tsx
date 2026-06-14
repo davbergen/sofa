@@ -8,6 +8,8 @@ interface FieldNoteItem {
   sessionId: number | null;
   issueNumber: number | null;
   issueUrl: string | null;
+  recommendation: 'grill' | 'issue' | null;
+  rationale: string | null;
 }
 
 interface FieldNotes {
@@ -241,10 +243,15 @@ function NoteIcon() {
 /** The factory floor for one Project: ready Issues, Dispatch, run records, usage. */
 export function ProjectDashboard({
   projectId,
+  hostBusy = false,
   onStartSession,
   onViewSession,
 }: {
   projectId: number;
+  /** True when an interactive Session is live anywhere in Sofa — the host slot
+   *  is global, so Process Notes must lock against any live host run, not just
+   *  one in this Project. */
+  hostBusy?: boolean;
   onStartSession?: (prompt: string, skill?: string) => Promise<number>;
   onViewSession?: (sessionId: number) => void;
 }) {
@@ -278,6 +285,11 @@ export function ProjectDashboard({
   // Token Usage compaction (#120): the per-day breakdown is behind a toggle;
   // total + in/out bars stay always-visible above it.
   const [usageDaysOpen, setUsageDaysOpen] = useState(false);
+  // Process Notes in-flight: blocks the button (alongside `hostBusy`) and drives
+  // the in-progress label. Local because the run is one-shot and short-lived;
+  // a server restart mid-run loses no durable state — verdicts only write on
+  // success, so a dropped run leaves Items unchanged.
+  const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -484,6 +496,31 @@ export function ProjectDashboard({
     if (res.ok) setNotes(await res.json());
   }
 
+  // Trigger a one-shot Process Notes run for this Project. The server holds the
+  // global host-run slot for the duration; UI also blocks the button via
+  // `processing` + `hostBusy` so the user can't double-fire. Failure surfaces in
+  // the Field Notes error banner and leaves Items untouched (server is the
+  // authority — verdicts only write on success).
+  async function processNotes() {
+    setNotesError(null);
+    setProcessing(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/process-notes`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setNotes(await res.json());
+      } else {
+        const body = await res.json().catch(() => null);
+        setNotesError(
+          (body as { error?: string } | null)?.error ?? `process notes failed (${res.status})`,
+        );
+      }
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   async function removeItem(itemId: number) {
     setNotesError(null);
     const res = await fetch(`/api/projects/${projectId}/field-notes/items/${itemId}`, {
@@ -535,6 +572,9 @@ export function ProjectDashboard({
     }
   }
 
+  const hasUnacted = !!notes?.items.some((i) => !i.acted);
+  const processNotesLocked = hostBusy || processing;
+
   const total = usage?.total;
   const hasUsage = !!total && total.totalTokens > 0;
   // In/out bars are sized relative to the larger of the two, so the dominant
@@ -551,6 +591,23 @@ export function ProjectDashboard({
           </span>
           <span className="ti">Field Notes</span>
           <span className="tag">drag a .txt</span>
+          {hasUnacted && (
+            <button
+              type="button"
+              className="cz-disp"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => void processNotes()}
+              disabled={processNotesLocked}
+              title={
+                hostBusy && !processing
+                  ? 'A host run is active — one host run at a time.'
+                  : undefined
+              }
+              aria-busy={processing}
+            >
+              {processing ? 'Processing…' : 'Process Notes'}
+            </button>
+          )}
         </div>
         {notesError && <p role="alert" className="cz-alert">{notesError}</p>}
         <div
@@ -656,6 +713,14 @@ export function ProjectDashboard({
                   <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
                     {item.text}
                   </div>
+                  {item.recommendation && (
+                    <span
+                      className={`cz-fn-rec cz-fn-rec-${item.recommendation}`}
+                      aria-label={`Recommendation: ${item.recommendation === 'grill' ? 'Grill suggested' : 'Cut suggested'}`}
+                    >
+                      {item.recommendation === 'grill' ? 'Grill suggested' : 'Cut suggested'}
+                    </span>
+                  )}
                   {filing?.id === item.id ? (
                     // Create Issue confirm/edit step: pre-filled from the Item,
                     // editable before filing. No LLM call — just a tweak-and-file.
