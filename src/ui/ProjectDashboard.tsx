@@ -21,7 +21,15 @@ interface ReadyIssue {
   url: string;
 }
 
-type RunState = 'cloning' | 'working' | 'pushing' | 'pr_open' | 'failed' | 'killed';
+type RunState =
+  | 'cloning'
+  | 'working'
+  | 'pushing'
+  | 'pr_open'
+  | 'pr_merged'
+  | 'pr_closed'
+  | 'failed'
+  | 'killed';
 
 interface Run {
   id: number;
@@ -54,6 +62,8 @@ const STATE_LABELS: Record<RunState, string> = {
   working: 'working',
   pushing: 'pushing',
   pr_open: 'PR open',
+  pr_merged: 'PR merged',
+  pr_closed: 'PR closed',
   failed: 'failed',
   killed: 'killed',
 };
@@ -62,8 +72,8 @@ const ACTIVE: RunState[] = ['cloning', 'working', 'pushing'];
 
 /** Maps a run's lifecycle state to a palette tone: sage=ok, rose=error, tan=active. */
 function stateTone(state: RunState): string {
-  if (state === 'pr_open') return 'ok';
-  if (state === 'failed') return 'err';
+  if (state === 'pr_open' || state === 'pr_merged') return 'ok';
+  if (state === 'failed' || state === 'pr_closed') return 'err';
   if (state === 'killed') return 'killed';
   return 'active';
 }
@@ -169,6 +179,7 @@ export function ProjectDashboard({
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [usage, setUsage] = useState<ProjectUsage | null>(null);
   const [killError, setKillError] = useState<string | null>(null);
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
   const [notes, setNotes] = useState<FieldNotes | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -223,6 +234,22 @@ export function ProjectDashboard({
       setSettingsError((body as { error?: string } | null)?.error ?? `save failed (${res.status})`);
     }
   }
+
+  // Reconciliation: re-reads GitHub PR truth for `pr_open` runs of this
+  // Project so the floor catches up when the automerge workflow lands a PR
+  // (or it's closed unmerged). Fires on mount + the manual Refresh; never
+  // folded into the 2s active-poll. Fail-soft: a `gh` failure surfaces as a
+  // banner and never overwrites run state.
+  const reconcile = useCallback(async () => {
+    setReconcileError(null);
+    const res = await fetch(`/api/projects/${projectId}/reconcile`, { method: 'POST' });
+    if (res.ok) {
+      setRuns(await res.json());
+    } else {
+      const body = await res.json().catch(() => null);
+      setReconcileError(body?.error ?? `reconcile failed (${res.status})`);
+    }
+  }, [projectId]);
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/runs`);
@@ -297,6 +324,12 @@ export function ProjectDashboard({
     const timer = setInterval(() => void refreshRuns(), 2000);
     return () => clearInterval(timer);
   }, [refreshRuns, anyActive]);
+
+  // Reconcile once on mount so PRs landed/closed while the dashboard was away
+  // are reflected the moment it loads.
+  useEffect(() => {
+    void reconcile();
+  }, [reconcile]);
 
   const usageByRun = new Map((usage?.byRun ?? []).map((u) => [u.runId, u]));
 
@@ -609,8 +642,17 @@ export function ProjectDashboard({
           </span>
           <span className="ti">Worker Runs</span>
           <span className="tag">{anyActive ? 'running' : 'idle'}</span>
+          <button
+            type="button"
+            className="cz-disp"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => void reconcile()}
+          >
+            Refresh
+          </button>
         </div>
         {killError && <p role="alert" className="cz-alert">{killError}</p>}
+        {reconcileError && <p role="alert" className="cz-alert">{reconcileError}</p>}
         {runs.length === 0 ? (
           <div className="cz-empty">
             <div className="eic">
@@ -649,7 +691,7 @@ export function ProjectDashboard({
                   </div>
                   <div className="meta">
                     <span className="mono">started {run.startedAt}</span>
-                    {run.state === 'pr_open' && run.prUrl && (
+                    {(run.state === 'pr_open' || run.state === 'pr_merged' || run.state === 'pr_closed') && run.prUrl && (
                       <a href={run.prUrl} target="_blank" rel="noreferrer">
                         view PR
                       </a>

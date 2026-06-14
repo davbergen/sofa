@@ -39,6 +39,12 @@ export interface GitHubAdapter {
    * Issues or publishing PRDs against a freshly opened repo.
    */
   ensureLabels(dir: string, labels: string[]): Promise<void>;
+  /**
+   * Reads the current state of a pull request by URL. Returns 'OPEN',
+   * 'MERGED' or 'CLOSED' (closed unmerged). Used by reconciliation to advance
+   * `pr_open` runs past the point a Worker can see.
+   */
+  getPrState(dir: string, prUrl: string): Promise<'OPEN' | 'MERGED' | 'CLOSED'>;
 }
 
 /** Lifecycle phases a running Worker reports before it finishes. */
