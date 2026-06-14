@@ -272,6 +272,12 @@ export function ProjectDashboard({
   const [workerModel, setWorkerModel] = useState<string | null>(null);
   const [sessionModel, setSessionModel] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  // Set-once compaction (#120): Project Settings collapses behind the gear so
+  // the model selectors stop occupying fixed space after the initial pick.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Token Usage compaction (#120): the per-day breakdown is behind a toggle;
+  // total + in/out bars stay always-visible above it.
+  const [usageDaysOpen, setUsageDaysOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -733,45 +739,58 @@ export function ProjectDashboard({
         </div>
       </section>
 
-      {/* Project Settings */}
+      {/* Project Settings — set-once, so collapsed by default (#120). The
+          card header doubles as the expander button so the closed state is
+          just the title + gear with no fixed body. */}
       <section className="cz-cush cz-card" aria-label="Project Settings">
-        <div className="cz-card-h">
+        <button
+          type="button"
+          className="cz-card-h cz-card-h-toggle"
+          aria-expanded={settingsOpen}
+          aria-controls={`project-settings-body-${projectId}`}
+          onClick={() => setSettingsOpen((v) => !v)}
+        >
           <span className="ic tan">
             <GearIcon />
           </span>
           <span className="ti">Project Settings</span>
-        </div>
-        {settingsError && <p role="alert" className="cz-alert">{settingsError}</p>}
-        <div className="cz-setting-row">
-          <label className="cz-setting-label" htmlFor={`worker-model-${projectId}`}>Worker model</label>
-          <select
-            id={`worker-model-${projectId}`}
-            className="cz-select"
-            value={workerModel ?? ''}
-            onChange={(e) => void saveWorkerModel(e.target.value || null)}
-          >
-            <option value="">Default</option>
-            <option value="opus">opus</option>
-            <option value="sonnet">sonnet</option>
-            <option value="haiku">haiku</option>
-            <option value="fable">fable</option>
-          </select>
-        </div>
-        <div className="cz-setting-row">
-          <label className="cz-setting-label" htmlFor={`session-model-${projectId}`}>Session model</label>
-          <select
-            id={`session-model-${projectId}`}
-            className="cz-select"
-            value={sessionModel ?? ''}
-            onChange={(e) => void saveSessionModel(e.target.value || null)}
-          >
-            <option value="">Default</option>
-            <option value="opus">opus</option>
-            <option value="sonnet">sonnet</option>
-            <option value="haiku">haiku</option>
-            <option value="fable">fable</option>
-          </select>
-        </div>
+          <span className="tag">{settingsOpen ? 'hide' : 'show'}</span>
+        </button>
+        {settingsOpen && (
+          <div id={`project-settings-body-${projectId}`}>
+            {settingsError && <p role="alert" className="cz-alert">{settingsError}</p>}
+            <div className="cz-setting-row">
+              <label className="cz-setting-label" htmlFor={`worker-model-${projectId}`}>Worker model</label>
+              <select
+                id={`worker-model-${projectId}`}
+                className="cz-select"
+                value={workerModel ?? ''}
+                onChange={(e) => void saveWorkerModel(e.target.value || null)}
+              >
+                <option value="">Default</option>
+                <option value="opus">opus</option>
+                <option value="sonnet">sonnet</option>
+                <option value="haiku">haiku</option>
+                <option value="fable">fable</option>
+              </select>
+            </div>
+            <div className="cz-setting-row">
+              <label className="cz-setting-label" htmlFor={`session-model-${projectId}`}>Session model</label>
+              <select
+                id={`session-model-${projectId}`}
+                className="cz-select"
+                value={sessionModel ?? ''}
+                onChange={(e) => void saveSessionModel(e.target.value || null)}
+              >
+                <option value="">Default</option>
+                <option value="opus">opus</option>
+                <option value="sonnet">sonnet</option>
+                <option value="haiku">haiku</option>
+                <option value="fable">fable</option>
+              </select>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Ready Issues — tall */}
@@ -792,8 +811,18 @@ export function ProjectDashboard({
           </div>
         )}
         {issues && issues.length > 0 && (
-          <div>
-            {issues.map((issue) => {
+          // Bounded-height scroll list (#120): the queue grows arbitrarily, so
+          // the card has a max height and the rows scroll inside it. Issues
+          // without an open PR (dispatchable) are pinned above those with one
+          // so a working queue surfaces what the user can actually fire next.
+          <div className="cz-issue-list">
+            {[...issues]
+              .sort((a, b) => {
+                const aOpen = openPrByIssue.has(a.number) ? 1 : 0;
+                const bOpen = openPrByIssue.has(b.number) ? 1 : 0;
+                return aOpen - bOpen;
+              })
+              .map((issue) => {
               // An Issue with an open PR is still visible — Dispatch is greyed
               // out and replaced by a link to the live PR, so the Issue can't
               // be silently re-dispatched while review is in flight.
@@ -1006,17 +1035,32 @@ export function ProjectDashboard({
                 </div>
               </div>
             </div>
-            <ul className="cz-days">
-              {usage!.byDay.map((day) => (
-                <li key={day.day}>
-                  <span className="mono">{day.day}</span>
-                  <span>
-                    {formatTokens(day.totalTokens)} tok ({formatTokens(day.inputTokens)} in,{' '}
-                    {formatTokens(day.outputTokens)} out)
-                  </span>
-                </li>
-              ))}
-            </ul>
+            {usage!.byDay.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="cz-usage-toggle"
+                  aria-expanded={usageDaysOpen}
+                  aria-controls={`token-usage-days-${projectId}`}
+                  onClick={() => setUsageDaysOpen((v) => !v)}
+                >
+                  {usageDaysOpen ? 'hide' : 'show'} per-day breakdown
+                </button>
+                {usageDaysOpen && (
+                  <ul className="cz-days" id={`token-usage-days-${projectId}`}>
+                    {usage!.byDay.map((day) => (
+                      <li key={day.day}>
+                        <span className="mono">{day.day}</span>
+                        <span>
+                          {formatTokens(day.totalTokens)} tok ({formatTokens(day.inputTokens)} in,{' '}
+                          {formatTokens(day.outputTokens)} out)
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
           </>
         )}
       </section>
