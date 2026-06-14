@@ -41,6 +41,8 @@ interface ActiveSession {
   model?: string;
   /** Absolute working directory (the launching Project's dir) — BOOT cwd. */
   dir?: string;
+  /** ISO timestamp the Session started — drives the live elapsed timer. */
+  startedAt?: string;
 }
 
 interface PastSession {
@@ -306,6 +308,55 @@ function TermLineRow({ line }: { line: TermLine }) {
   );
 }
 
+function formatElapsed(totalSeconds: number): string {
+  const s = Math.max(0, totalSeconds);
+  const hours = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  const mm = mins.toString().padStart(2, '0');
+  const ss = secs.toString().padStart(2, '0');
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/**
+ * The vim-style statusline (ADR 0008): mode badge, skill, model badge, and a
+ * live elapsed timer ticked from `startedAt`. The token-meter and `⎇ branch`
+ * cells from the visual handoff are deferred and rendered as absent (no
+ * placeholders) because live per-Session token usage is not streamed today and
+ * the working-copy branch is not surfaced.
+ */
+function SessionStatusline({
+  session,
+  status,
+}: {
+  session: ActiveSession;
+  status: SessionStatus | null;
+}) {
+  const mode = session.skill === 'grill-with-docs' ? 'Grill' : 'Session';
+  const frozen = status === 'done' || status === 'error';
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (frozen) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [frozen]);
+
+  const startedMs = session.startedAt ? new Date(session.startedAt).getTime() : now;
+  const elapsed = formatElapsed(Math.floor((now - startedMs) / 1000));
+
+  return (
+    <div className="cz-term-statusline" role="status" aria-label="Session statusline">
+      <span className={`stl-mode mode-${mode.toLowerCase()}`}>{mode}</span>
+      {session.skill && <span className="stl-cell stl-skill">{session.skill}</span>}
+      {session.model && <span className="stl-cell stl-model">{session.model}</span>}
+      <span className="stl-spacer" />
+      <span className="stl-cell stl-elapsed mono" aria-label="Elapsed time">
+        {elapsed}
+      </span>
+    </div>
+  );
+}
+
 interface LiveSession {
   session: ActiveSession;
   transcript: TranscriptEntry[];
@@ -433,6 +484,8 @@ function SessionTerminal({ live }: { live: LiveSession }) {
 
         {streaming && <span className="cz-term-cursor" aria-hidden="true" />}
       </div>
+
+      <SessionStatusline session={session} status={status} />
 
       <form className="cz-term-input" onSubmit={submit}>
         <span className="user">david@sofa</span>
@@ -1027,6 +1080,7 @@ export function App() {
       prompt,
       skill,
       dir: project.dir,
+      startedAt: started.startedAt,
     });
     setTranscript([]);
     setPending([]);
@@ -1065,6 +1119,7 @@ export function App() {
       projectName: project?.name ?? `Project ${projectId}`,
       prompt: persisted.prompt,
       dir: project?.dir,
+      startedAt: persisted.startedAt,
     });
     setTranscript(events.map(toEntry));
     setStatus(persisted.status === 'error' ? 'error' : 'done');
@@ -1163,6 +1218,7 @@ export function App() {
       projectName,
       prompt: past.prompt,
       dir: projects.find((p) => p.id === past.projectId)?.dir,
+      startedAt: past.startedAt,
     });
     setTranscript(events.map(toEntry));
     setStatus(past.status === 'error' ? 'error' : 'done');
@@ -1190,6 +1246,7 @@ export function App() {
       projectName,
       prompt,
       dir: projects.find((p) => p.id === past.projectId)?.dir,
+      startedAt: past.startedAt,
     });
     setTranscript(events.map(toEntry));
     setStatus('streaming');
