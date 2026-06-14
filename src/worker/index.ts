@@ -16,14 +16,17 @@ import { join } from 'node:path';
 import { runWorker, redactToken, makeClaudeAgent } from './harness.js';
 import { spawnRunner } from './runner.js';
 
+const workDir = mkdtempSync(join(process.env.WORKER_WORKDIR ?? tmpdir(), 'sofa-worker-'));
+const token = process.env.GITHUB_TOKEN ?? '';
+
+// Redact the GitHub token from every stream-formatted activity line before it
+// reaches stderr — the docker adapter reads those lines verbatim into the
+// activity SSE feed, and any leak would surface to the UI.
 const agent = makeClaudeAgent(
   spawnRunner,
   process.env.WORKER_MODEL?.trim() || undefined,
-  (text) => process.stderr.write(text),
+  (text) => process.stderr.write(redactToken(text, token)),
 );
-
-const workDir = mkdtempSync(join(process.env.WORKER_WORKDIR ?? tmpdir(), 'sofa-worker-'));
-const token = process.env.GITHUB_TOKEN ?? '';
 
 const outcome = await runWorker(process.env, {
   runner: spawnRunner,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   makeClaudeAgent,
+  makeStreamFormatter,
   parseWorkerEnv,
   redactToken,
   runWorker,
@@ -234,12 +235,111 @@ describe('makeClaudeAgent', () => {
     expect(calls[0]).not.toContain('--model');
   });
 
+  it('asks the CLI for stream-json so activity can be tailed live', async () => {
+    const { runner, calls } = makeRunner([[/^claude/, ok('{}')]]);
+    const agent = makeClaudeAgent(runner);
+    await agent.implementIssue({ cwd: '/work', prompt: 'do the thing' });
+
+    expect(calls[0]).toContain('--output-format stream-json');
+    expect(calls[0]).toContain('--verbose');
+  });
+
   it('throws when claude exits non-zero', async () => {
     const { runner } = makeRunner([[/^claude/, failWith('quota exhausted', 1)]]);
     const agent = makeClaudeAgent(runner);
     await expect(agent.implementIssue({ cwd: '/work', prompt: 'do the thing' })).rejects.toThrow(
       'claude exited 1',
     );
+  });
+});
+
+describe('makeStreamFormatter', () => {
+  const collect = (lines: string[]) => {
+    const f = makeStreamFormatter();
+    const out: string[] = [];
+    for (const line of lines) f.handle(line, (m) => out.push(m));
+    return { messages: out, usage: f.usage };
+  };
+
+  it('renders curated verbs for known tool uses, dropping raw JSON', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: 'src/foo.ts' } }] },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'npm test' } }] },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't3', name: 'Grep', input: { pattern: 'applyEvent' } }] },
+      }),
+    ];
+    expect(collect(lines).messages).toEqual([
+      'Editing src/foo.ts',
+      'Bash: npm test',
+      'Searching for "applyEvent"',
+    ]);
+  });
+
+  it('condenses assistant prose to its first sentence', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'Reading the harness now. It looks fine. Next step.' }] },
+    });
+    expect(collect([line]).messages).toEqual(['Reading the harness now.']);
+  });
+
+  it('drops tool_result bodies but surfaces errors as a short warning', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test' } }] },
+      }),
+      // Success tool_result is the firehose — never emitted.
+      JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'lots of output...' }] },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'boom' }] },
+      }),
+    ];
+    expect(collect(lines).messages).toEqual(['Bash: npm test', '⚠ Bash failed']);
+  });
+
+  it('falls back to Working… for unknown tools rather than leaking JSON', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 't1', name: 'FutureTool', input: { x: 1 } }] },
+    });
+    expect(collect([line]).messages[0]).toMatch(/^Working… /);
+  });
+
+  it('reads token usage off the final result event', () => {
+    const line = JSON.stringify({
+      type: 'result',
+      usage: {
+        input_tokens: 120,
+        output_tokens: 30,
+        cache_read_input_tokens: 400,
+        cache_creation_input_tokens: 50,
+      },
+    });
+    expect(collect([line]).usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheReadTokens: 400,
+      cacheCreationTokens: 50,
+    });
+  });
+
+  it('tolerates non-JSON and unknown event types without throwing', () => {
+    const { messages, usage } = collect(['not json', '', JSON.stringify({ type: 'system', subtype: 'init' })]);
+    expect(messages).toEqual([]);
+    expect(usage).toBeUndefined();
   });
 });
 

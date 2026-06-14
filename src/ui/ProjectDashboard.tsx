@@ -137,9 +137,17 @@ const MAX_FEED_LINES = 200;
 /**
  * Live activity feed for one running Worker. The server replays the buffered
  * tail first, so opening this mid-run shows recent activity immediately.
+ *
+ * The default view is the single **current-activity headline** — the latest
+ * activity line, derived purely from the same `activity` SSE that drove the
+ * old firehose feed (no new event type, no new column; survives reconnect via
+ * the existing buffered tail replay, per ADR 0007). The full feed is hidden
+ * behind a "show detail" toggle so a running Worker reads as a one-line
+ * status, not a wall of tool calls.
  */
 function WorkerActivityFeed({ runId }: { runId: number }) {
   const [entries, setEntries] = useState<ActivityEntry[]>([]);
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => {
     setEntries([]);
@@ -153,16 +161,35 @@ function WorkerActivityFeed({ runId }: { runId: number }) {
     return () => source.close();
   }, [runId]);
 
+  const latest = entries.at(-1);
+
   return (
-    <div role="log" aria-label="Worker activity" className="cz-feed mono">
-      {entries.length === 0 ? (
-        <div className="wait">Waiting for Worker activity…</div>
-      ) : (
-        entries.map((entry, i) => (
-          <div key={i} className="line">
-            {entry.message}
-          </div>
-        ))
+    <div className="cz-activity">
+      <div className="cz-activity-head">
+        <span className="cz-activity-headline mono" aria-live="polite" aria-label="Current Worker activity">
+          {latest ? latest.message : 'Waiting for Worker activity…'}
+        </span>
+        <button
+          type="button"
+          className="cz-activity-toggle"
+          aria-expanded={showDetail}
+          onClick={() => setShowDetail((v) => !v)}
+        >
+          {showDetail ? 'hide detail' : 'show detail'}
+        </button>
+      </div>
+      {showDetail && (
+        <div role="log" aria-label="Worker activity" className="cz-feed mono">
+          {entries.length === 0 ? (
+            <div className="wait">Waiting for Worker activity…</div>
+          ) : (
+            entries.map((entry, i) => (
+              <div key={i} className="line">
+                {entry.message}
+              </div>
+            ))
+          )}
+        </div>
       )}
     </div>
   );
