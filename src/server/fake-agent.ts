@@ -46,6 +46,8 @@ export class FakeAgent implements Agent {
   private undeliveredMessages = 0;
   private closed = false;
   private readonly closeWaiters: Array<() => void> = [];
+  /** Sentinel returned from `wait` when the session is closed mid-await. */
+  private static readonly CLOSED = '__fake_agent_closed__';
 
   constructor(
     private readonly script: FakeAgentStep[] = [{ type: 'assistant_text', text: 'Hello from the fake Agent.' }],
@@ -75,6 +77,14 @@ export class FakeAgent implements Agent {
       },
       close: () => {
         this.closed = true;
+        // Wake any pending question/permission waits so the emit loop can exit
+        // — closing a Session must terminate it even if a scripted step is
+        // blocked awaiting an answer or decision.
+        for (const resolver of this.resolvers.values()) resolver(FakeAgent.CLOSED);
+        this.resolvers.clear();
+        // Wake message waiters too, in case the script is paused on await_message.
+        for (const w of this.messageWaiters) w();
+        this.messageWaiters.length = 0;
         for (const w of this.closeWaiters) w();
         this.closeWaiters.length = 0;
       },
@@ -101,19 +111,23 @@ export class FakeAgent implements Agent {
     for (const step of script) {
       // Yield asynchronously so events stream like a real Agent's would.
       await new Promise((resolve) => setImmediate(resolve));
+      if (this.closed) return;
       if (step.type === 'await_message') {
         if (this.undeliveredMessages > 0) {
           this.undeliveredMessages--;
         } else {
           await new Promise<void>((resolve) => this.messageWaiters.push(resolve));
         }
+        if (this.closed) return;
         continue;
       }
       yield step;
       if (step.type === 'question') {
-        await this.wait(`question:${step.questionId}`);
+        const answer = await this.wait(`question:${step.questionId}`);
+        if (answer === FakeAgent.CLOSED) return;
       } else if (step.type === 'permission_request') {
         const decision = await this.wait(`permission:${step.requestId}`);
+        if (decision === FakeAgent.CLOSED) return;
         this.toolOutcomes.set(step.requestId, decision === 'allow' ? 'executed' : 'skipped');
       }
     }
