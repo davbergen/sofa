@@ -121,6 +121,16 @@ export class FieldNotesStore {
     return this.get(itemId);
   }
 
+  /**
+   * Deletes the Item row. Verifies ownership first, returning false if the
+   * Item does not belong to the given Project.
+   */
+  deleteItem(projectId: number, itemId: number): boolean {
+    if (!this.belongsToProject(projectId, itemId)) return false;
+    this.db.prepare('DELETE FROM field_note_items WHERE id = ?').run(itemId);
+    return true;
+  }
+
   private belongsToProject(projectId: number, itemId: number): boolean {
     const check = this.db
       .prepare(
