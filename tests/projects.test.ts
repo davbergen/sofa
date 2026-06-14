@@ -13,6 +13,12 @@ function makeApp() {
   return createApp(openDb(':memory:'), new FakeAgent());
 }
 
+function makeAppWithDb(agent?: FakeAgent) {
+  const db = openDb(':memory:');
+  const app = createApp(db, agent ?? new FakeAgent());
+  return { app, db };
+}
+
 const noopContainer: ContainerAdapter = {
   startWorker() {
     throw new Error('no Worker should start in these tests');
@@ -162,5 +168,114 @@ describe('SQLite store', () => {
     const reopened = openDb(dbPath);
     const projects = await (await createApp(reopened, new FakeAgent()).request('/api/projects')).json();
     expect(projects.map((p: { dir: string }) => p.dir)).toEqual([projectDir]);
+  });
+});
+
+describe('closing a Project', () => {
+  it('removes the Project from the list and returns 204', async () => {
+    const app = makeApp();
+    const dir = makeDir();
+    const opened = await (await open(app, dir)).json();
+
+    const res = await app.request(`/api/projects/${opened.id}`, { method: 'DELETE' });
+
+    expect(res.status).toBe(204);
+    const list = await (await app.request('/api/projects')).json();
+    expect(list).toHaveLength(0);
+  });
+
+  it('returns 404 for a non-existent Project', async () => {
+    const app = makeApp();
+
+    const res = await app.request('/api/projects/9999', { method: 'DELETE' });
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBeTruthy();
+  });
+
+  it('returns 409 while an active Worker run exists', async () => {
+    const { app, db } = makeAppWithDb();
+    const dir = makeDir();
+    const opened = await (await open(app, dir)).json();
+
+    // Insert an active worker_run directly — avoids needing a real container adapter.
+    db
+      .prepare("INSERT INTO worker_runs (project_id, issue_number, issue_title, state) VALUES (?, 1, 'test', 'cloning')")
+      .run(opened.id);
+
+    const res = await app.request(`/api/projects/${opened.id}`, { method: 'DELETE' });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Worker run/i);
+  });
+
+  it('returns 409 while a Session is running', async () => {
+    const { app } = makeAppWithDb(new FakeAgent([], { hang: true }));
+    const dir = makeDir();
+    const opened = await (await open(app, dir)).json();
+
+    // Start a session — hanging FakeAgent keeps status = 'running' indefinitely.
+    await app.request(`/api/projects/${opened.id}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hello' }),
+    });
+
+    const res = await app.request(`/api/projects/${opened.id}`, { method: 'DELETE' });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/Session/i);
+  });
+
+  it('deletes all child rows and leaves the DB consistent', async () => {
+    const { app, db } = makeAppWithDb();
+    const dir = makeDir();
+    const opened = await (await open(app, dir)).json();
+    const projectId = opened.id as number;
+
+    // Insert representative history directly — terminal states only so close is allowed.
+    db
+      .prepare("INSERT INTO sessions (project_id, prompt, status) VALUES (?, 'test', 'done')")
+      .run(projectId);
+    const sessionId = Number(
+      (db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id,
+    );
+    db
+      .prepare("INSERT INTO session_events (session_id, type, payload) VALUES (?, 'assistant_text', '{}')")
+      .run(sessionId);
+    db
+      .prepare("INSERT INTO worker_runs (project_id, issue_number, issue_title, state) VALUES (?, 1, 'x', 'done')")
+      .run(projectId);
+    const runId = Number(
+      (db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id,
+    );
+    db
+      .prepare('INSERT INTO token_usage (project_id, run_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) VALUES (?, ?, 1, 1, 0, 0)')
+      .run(projectId, runId);
+    db
+      .prepare('INSERT INTO field_notes (project_id) VALUES (?)')
+      .run(projectId);
+    const noteId = Number(
+      (db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id,
+    );
+    db
+      .prepare("INSERT INTO field_note_items (note_id, position, text) VALUES (?, 0, 'item')")
+      .run(noteId);
+
+    const res = await app.request(`/api/projects/${projectId}`, { method: 'DELETE' });
+
+    expect(res.status).toBe(204);
+
+    // Verify no orphaned child rows remain.
+    const count = (table: string, col: string, val: number) =>
+      (db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${col} = ?`).get(val) as { n: number }).n;
+
+    expect(count('sessions', 'project_id', projectId)).toBe(0);
+    expect(count('session_events', 'session_id', sessionId)).toBe(0);
+    expect(count('worker_runs', 'project_id', projectId)).toBe(0);
+    expect(count('token_usage', 'project_id', projectId)).toBe(0);
+    expect(count('field_notes', 'project_id', projectId)).toBe(0);
+    expect(count('field_note_items', 'note_id', noteId)).toBe(0);
+    expect(count('open_projects', 'id', projectId)).toBe(0);
   });
 });
