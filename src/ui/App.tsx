@@ -931,6 +931,7 @@ function DirectoryPicker({
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
   const [dir, setDir] = useState('');
   const [browsing, setBrowsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -952,7 +953,12 @@ export function App() {
 
   async function refresh() {
     const res = await fetch('/api/projects');
-    setProjects(await res.json());
+    const list: Project[] = await res.json();
+    setProjects(list);
+    setActiveProjectId((current) => {
+      if (current !== null && list.some((p) => p.id === current)) return current;
+      return list[0]?.id ?? null;
+    });
   }
 
   useEffect(() => {
@@ -978,8 +984,18 @@ export function App() {
       setError(body?.error ?? `failed to open project (${res.status})`);
       return;
     }
+    const opened = (await res.json().catch(() => null)) as Project | null;
     setDir('');
-    await refresh();
+    const listRes = await fetch('/api/projects');
+    const list: Project[] = await listRes.json();
+    setProjects(list);
+    if (opened && list.some((p) => p.id === opened.id)) {
+      setActiveProjectId(opened.id);
+    } else {
+      setActiveProjectId((current) =>
+        current !== null && list.some((p) => p.id === current) ? current : list[0]?.id ?? null,
+      );
+    }
   }
 
   async function answerQuestion(sessionId: number, questionId: string, answer: string) {
@@ -1264,99 +1280,141 @@ export function App() {
     attachStream(past.id);
   }
 
+  const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+  const liveSessionProjectId = session?.projectId ?? null;
+  const activeLive: LiveSession | null =
+    session && activeProject && session.projectId === activeProject.id
+      ? {
+          session,
+          transcript,
+          pending,
+          status,
+          prdDraft,
+          prdPublished,
+          onAnswer: (questionId, answer) => void answerQuestion(session.id, questionId, answer),
+          onDecide: (requestId, decision) => void decidePermission(session.id, requestId, decision),
+          onSend: (text) => {
+            setStatus('streaming');
+            void sendSessionMessage(session.id, text);
+          },
+          onEnd: () => void endAndCollapse(),
+          onRevise: (text) => void revisePrd(session.id, text),
+          onApprove: () => void approvePrd(session.id),
+        }
+      : null;
+
   return (
-    <div className="cz-app">
-      <header className="cz-top">
-        <div className="cz-brand">
+    <div className="cz-shell">
+      <aside className="cz-projrail" aria-label="Project Rail">
+        <div className="cz-railhead">
           <div className="cz-logo">
-            <SofaMark size={32} stroke="currentColor" />
+            <SofaMark size={28} stroke="currentColor" />
           </div>
           <div>
             <h1 className="cz-word">Sofa</h1>
-            <div className="cz-sub">your software factory — put your feet up while the workers run</div>
+            <div className="cz-sub">software factory</div>
           </div>
         </div>
-        <div className="cz-stamp">Workshop · v1</div>
-      </header>
 
-      <form onSubmit={openProject} className="cz-open">
-        <input
-          aria-label="Project directory"
-          className="cz-field"
-          placeholder="▸ C:\path\to\project"
-          value={dir}
-          onChange={(e) => setDir(e.target.value)}
-        />
-        <button type="button" className="cz-btn" onClick={() => setBrowsing(true)}>
-          Browse…
-        </button>
-        <button type="submit" className="cz-btn tan" disabled={!dir.trim()}>
-          Open Project
-        </button>
-      </form>
-      {browsing && (
-        <DirectoryPicker
-          onSelect={(path) => setDir(path)}
-          onClose={() => setBrowsing(false)}
-        />
-      )}
-      {error && (
-        <p role="alert" className="cz-alert">
-          {error}
-        </p>
-      )}
+        <nav className="cz-rail-list" aria-label="Open Projects">
+          {projects.length === 0 ? (
+            <p className="cz-muted cz-rail-empty">No Projects open yet.</p>
+          ) : (
+            <ul role="list">
+              {projects.map((p) => {
+                const isActive = p.id === activeProjectId;
+                const isBusy = liveSessionProjectId === p.id;
+                return (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      aria-label={`Project ${p.name}${isActive ? ' (Active)' : ''}`}
+                      className={`cz-rail-item${isActive ? ' active' : ''}`}
+                      onClick={() => setActiveProjectId(p.id)}
+                    >
+                      <span className="av" aria-hidden="true">
+                        <SofaMark size={18} stroke="currentColor" />
+                      </span>
+                      <span className="meta">
+                        <span className="nm">{p.name}</span>
+                        <span className="pa mono">{p.dir}</span>
+                      </span>
+                      {isBusy && <span className="live-dot" aria-label="Live Session" />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </nav>
 
-      <div className="cz-h">
-        <span className="t">Open Projects</span>
-        <span className="d" />
-        <span className="c mono">{projects.length} active</span>
-      </div>
-      {projects.length === 0 ? (
-        <p className="cz-muted">No Projects open yet.</p>
-      ) : (
-        projects.map((p) => {
-          const live: LiveSession | null =
-            session && session.projectId === p.id
-              ? {
-                  session,
-                  transcript,
-                  pending,
-                  status,
-                  prdDraft,
-                  prdPublished,
-                  onAnswer: (questionId, answer) => void answerQuestion(session.id, questionId, answer),
-                  onDecide: (requestId, decision) => void decidePermission(session.id, requestId, decision),
-                  onSend: (text) => {
-                    setStatus('streaming');
-                    void sendSessionMessage(session.id, text);
-                  },
-                  onEnd: () => void endAndCollapse(),
-                  onRevise: (text) => void revisePrd(session.id, text),
-                  onApprove: () => void approvePrd(session.id),
-                }
-              : null;
-          return (
-            <ProjectCard
-              key={p.id}
-              project={p}
-              skills={skills}
-              prompt={promptFor(p.id)}
-              skill={skillByProject[p.id] ?? ''}
-              dashboardOpen={!hiddenDashboards[p.id]}
-              liveSession={live}
-              receded={session !== null && session.projectId !== p.id}
-              onPromptChange={(value) => setPrompts((prev) => ({ ...prev, [p.id]: value }))}
-              onSkillChange={(value) => setSkillByProject((prev) => ({ ...prev, [p.id]: value }))}
-              onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
-              onLoadSessions={() => void loadSessions(p)}
-              onStartSession={(prompt, skill) => startSessionWith(p, prompt, skill)}
-              onViewSession={(sessionId) => void viewSessionById(p.id, sessionId)}
-            />
-          );
-        })
-      )}
+        <form onSubmit={openProject} className="cz-rail-open">
+          <input
+            aria-label="Project directory"
+            className="cz-field"
+            placeholder="▸ C:\path\to\project"
+            value={dir}
+            onChange={(e) => setDir(e.target.value)}
+          />
+          <div className="cz-rail-open-actions">
+            <button type="button" className="cz-btn" onClick={() => setBrowsing(true)}>
+              Browse…
+            </button>
+            <button type="submit" className="cz-btn tan" disabled={!dir.trim()}>
+              Open Project
+            </button>
+          </div>
+        </form>
+      </aside>
 
-      {pastSessions && (
+      <main className="cz-main">
+        {browsing && (
+          <DirectoryPicker
+            onSelect={(path) => setDir(path)}
+            onClose={() => setBrowsing(false)}
+          />
+        )}
+        {error && (
+          <p role="alert" className="cz-alert">
+            {error}
+          </p>
+        )}
+
+        {activeProject ? (
+          <ProjectCard
+            key={activeProject.id}
+            project={activeProject}
+            skills={skills}
+            prompt={promptFor(activeProject.id)}
+            skill={skillByProject[activeProject.id] ?? ''}
+            dashboardOpen={!hiddenDashboards[activeProject.id]}
+            liveSession={activeLive}
+            receded={session !== null && session.projectId !== activeProject.id}
+            onPromptChange={(value) =>
+              setPrompts((prev) => ({ ...prev, [activeProject.id]: value }))
+            }
+            onSkillChange={(value) =>
+              setSkillByProject((prev) => ({ ...prev, [activeProject.id]: value }))
+            }
+            onToggleDashboard={() =>
+              setHiddenDashboards((prev) => ({
+                ...prev,
+                [activeProject.id]: !prev[activeProject.id],
+              }))
+            }
+            onLoadSessions={() => void loadSessions(activeProject)}
+            onStartSession={(prompt, skill) => startSessionWith(activeProject, prompt, skill)}
+            onViewSession={(sessionId) => void viewSessionById(activeProject.id, sessionId)}
+          />
+        ) : (
+          <p className="cz-muted cz-main-empty">
+            Open a Project from the Project Rail to get started.
+          </p>
+        )}
+
+        {pastSessions && (
         <section aria-label="Past Sessions" className="cz-section">
           <h2>Past Sessions</h2>
           {pastSessions.length === 0 ? (
@@ -1389,7 +1447,8 @@ export function App() {
             </ul>
           )}
         </section>
-      )}
+        )}
+      </main>
     </div>
   );
 }
