@@ -3,6 +3,11 @@
 // in <claudeDir>/skills/**/<name>/SKILL.md and inside installed plugins under
 // <claudeDir>/plugins/**/skills/**/<name>/SKILL.md. The directory is an
 // injectable seam so tests point at a temp dir instead of the real ~/.claude.
+//
+// Sofa also ships its own first-party skills in-repo (see `sofa-skills/`),
+// surfaced by `repoBundledSkillSource` and composed in front of the user
+// source so Sofa's bundled triage skill is available without the user
+// installing anything into ~/.claude.
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
@@ -36,6 +41,49 @@ export function fsSkillSource(claudeDir: string): SkillSource {
           if (skill && !byName.has(skill.name)) {
             byName.set(skill.name, skill);
           }
+        }
+      }
+      return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+    },
+  };
+}
+
+/**
+ * Lists skills from a single repo-bundled plugin directory laid out as a
+ * Claude Code local plugin: `<bundleDir>/skills/<name>/SKILL.md`. The
+ * companion `<bundleDir>/.claude-plugin/plugin.json` is what makes the SDK
+ * load it as a plugin at runtime (see `SdkAgent`); for the *listing*, only
+ * the `skills/` tree matters.
+ */
+export function repoBundledSkillSource(bundleDir: string): SkillSource {
+  return {
+    async list(): Promise<Skill[]> {
+      const byName = new Map<string, Skill>();
+      for (const path of await findSkillFiles(join(bundleDir, 'skills'), MAX_DEPTH)) {
+        const skill = await parseSkillFile(path);
+        if (skill && !byName.has(skill.name)) {
+          byName.set(skill.name, skill);
+        }
+      }
+      return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+    },
+  };
+}
+
+/**
+ * Merges several skill sources into one, first-source-wins on name collisions.
+ * Sofa passes the user `~/.claude` source first and the in-repo bundled
+ * source second so a same-named user skill still shadows the bundled one
+ * (matching the user-shadows-plugin precedence inside `fsSkillSource`),
+ * while bundled skills remain discoverable when no user override exists.
+ */
+export function composeSkillSources(...sources: SkillSource[]): SkillSource {
+  return {
+    async list(): Promise<Skill[]> {
+      const byName = new Map<string, Skill>();
+      for (const source of sources) {
+        for (const skill of await source.list()) {
+          if (!byName.has(skill.name)) byName.set(skill.name, skill);
         }
       }
       return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));

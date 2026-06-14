@@ -1,0 +1,5 @@
+{
+  "name": "sofa-skills",
+  "version": "0.1.0",
+  "description": "Skills bundled with the Sofa repo, loaded as a local plugin so Sofa's host agent runs do not depend on the user's ~/.claude."
+}
