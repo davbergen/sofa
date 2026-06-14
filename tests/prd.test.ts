@@ -21,6 +21,7 @@ function fakeGitHub() {
       });
     },
     ensureLabels: () => Promise.resolve(),
+    getPrState: () => Promise.resolve('OPEN'),
   };
   return { github, created };
 }
@@ -257,6 +258,7 @@ describe('Approve', () => {
       listReadyIssues: () => Promise.resolve([]),
       createIssue: () => Promise.reject(new Error('gh not authenticated')),
       ensureLabels: () => Promise.resolve(),
+      getPrState: () => Promise.resolve('OPEN'),
     };
     const app = createApp(openDb(':memory:'), new FakeAgent([DRAFT]), {
       github,

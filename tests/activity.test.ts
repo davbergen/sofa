@@ -18,6 +18,7 @@ const fakeGitHub: GitHubAdapter = {
   listReadyIssues: () => Promise.resolve([]),
   createIssue: () => Promise.resolve({ number: 1, url: 'https://github.com/davbergen/scratch/issues/1' }),
   ensureLabels: () => Promise.resolve(),
+  getPrState: () => Promise.resolve('OPEN'),
 };
 
 /** Fake Container adapter: the test scripts Worker events through `emit`. */

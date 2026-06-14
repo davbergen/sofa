@@ -22,6 +22,7 @@ function fakeGitHub() {
       });
     },
     ensureLabels: () => Promise.resolve(),
+    getPrState: () => Promise.resolve('OPEN'),
   };
   return { github, created };
 }
@@ -153,6 +154,7 @@ describe('Cut a Field Note Item directly into a ready Issue', () => {
         );
       },
       ensureLabels: () => Promise.resolve(),
+      getPrState: () => Promise.resolve('OPEN'),
     };
     const app = makeHarness(github);
     const project = await openProject(app, makeDir());
@@ -174,6 +176,7 @@ describe('Cut a Field Note Item directly into a ready Issue', () => {
       listReadyIssues: () => Promise.resolve([]),
       createIssue: () => Promise.reject(new Error('gh not authenticated')),
       ensureLabels: () => Promise.resolve(),
+      getPrState: () => Promise.resolve('OPEN'),
     };
     const app = makeHarness(github);
     const project = await openProject(app, makeDir());

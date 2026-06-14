@@ -34,6 +34,7 @@ function fakeGitHub(ensure: (dir: string, labels: string[]) => Promise<void> = (
       ensured.push({ dir, labels });
       return ensure(dir, labels);
     },
+    getPrState: () => Promise.resolve('OPEN'),
   };
   return { github, ensured };
 }

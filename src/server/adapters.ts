@@ -87,6 +87,18 @@ export function ghGitHubAdapter(): GitHubAdapter {
       return { number, url };
     },
 
+    async getPrState(dir, prUrl) {
+      const res = await exec('gh', ['pr', 'view', prUrl, '--json', 'state', '--jq', '.state'], dir);
+      if (res.code !== 0) {
+        throw new Error(`gh pr view failed (exit ${res.code}): ${res.stderr.trim().slice(0, 300)}`);
+      }
+      const state = res.stdout.trim();
+      if (state !== 'OPEN' && state !== 'MERGED' && state !== 'CLOSED') {
+        throw new Error(`gh pr view returned unexpected state: ${state || '(empty)'}`);
+      }
+      return state;
+    },
+
     async ensureLabels(dir, labels) {
       // Read what's already there so existing labels are left untouched — we
       // only create the ones that are missing (no `--force`, no overwrite).

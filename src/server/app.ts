@@ -13,7 +13,7 @@ import { FieldNotesStore } from './field-notes-store.js';
 import { parseFieldNotes } from './field-notes.js';
 import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
 import { READY_LABEL } from './adapters.js';
-import { ACTIVE_STATES, applyEvent, isActive, type RunState } from './runs.js';
+import { ACTIVE_STATES, applyEvent, applyPrState, isActive, type RunState } from './runs.js';
 import { readSofaConfig, SofaConfigError } from './sofa-config.js';
 import { projectUsage, recordRunUsage, recordSessionUsage, withUsageRecording } from './usage.js';
 import { FsBrowseError, listDirectory } from './fs-browse.js';
@@ -626,6 +626,42 @@ export function createApp(
       .prepare('SELECT worker_model, session_model FROM open_projects WHERE id = ?')
       .get(project.id) as unknown as { worker_model: string | null; session_model: string | null } | undefined;
     return c.json({ workerModel: row?.worker_model ?? null, sessionModel: row?.session_model ?? null });
+  });
+
+  // On-demand reconciliation: re-read GitHub PR truth for every `pr_open` run
+  // of this Project, advancing each to `pr_merged` or `pr_closed` as warranted.
+  // The dashboard's 2s active-poll never touches GitHub; reconciliation runs on
+  // mount and on a manual Refresh. Fail-soft: if any `gh` lookup throws, no
+  // record is overwritten and a 502 surfaces the reason for the banner.
+  app.post('/api/projects/:id/reconcile', async (c) => {
+    if (!deps) {
+      return c.json({ error: 'GitHub adapter not configured' }, 500);
+    }
+    const project = getProject(c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'no such Project' }, 404);
+    }
+    const candidates = db
+      .prepare(`SELECT id, pr_url FROM worker_runs WHERE project_id = ? AND state = 'pr_open'`)
+      .all(project.id) as unknown as Array<{ id: number; pr_url: string | null }>;
+    try {
+      for (const row of candidates) {
+        if (!row.pr_url) continue;
+        const prState = await deps.github.getPrState(project.dir, row.pr_url);
+        const update = applyPrState('pr_open', prState);
+        if (!update) continue;
+        db.prepare('UPDATE worker_runs SET state = ? WHERE id = ?').run(update.state, row.id);
+      }
+    } catch (err) {
+      return c.json(
+        { error: `reconciling PR state failed: ${err instanceof Error ? err.message : String(err)}` },
+        502,
+      );
+    }
+    const rows = db
+      .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE project_id = ? ORDER BY id DESC`)
+      .all(project.id) as unknown as RunRow[];
+    return c.json(rows.map(toRun));
   });
 
   app.get('/api/projects/:id/runs', (c) => {
