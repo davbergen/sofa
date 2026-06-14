@@ -9,6 +9,17 @@ import type {
 import { SessionRun } from './sessions.js';
 import { docWriteFromToolUse } from './doc-writes.js';
 
+/**
+ * Expand a bare skill name to the forms the SDK's `skills` option recognises:
+ * the exact name (matches a user skill like `~/.claude/skills/<name>`) and the
+ * `:name` suffix (matches a plugin-qualified `<plugin>:<name>`). Pre-qualified
+ * inputs (already containing `:`) are passed through unchanged.
+ */
+export function skillEntries(skill: string): string[] {
+  if (skill.includes(':')) return [skill];
+  return [skill, `:${skill}`];
+}
+
 export interface SdkAgentOptions {
   /** Cap the number of agentic turns (useful for smoke tests). */
   maxTurns?: number;
@@ -138,7 +149,14 @@ export class SdkAgent implements Agent {
         // The SDK discovers skills from the same ~/.claude setup the CLI
         // uses (settingSources defaults to all sources); naming one here
         // enables it and loads its frontmatter into the system prompt.
-        ...(skill ? { skills: [skill] } : {}),
+        // The SDK matches entries as exact name, plugin-qualified name, or
+        // `:name` suffix — pass both forms so a bare skill name like
+        // `grill-with-docs` loads whether the skill lives in `~/.claude/skills/`
+        // (matches exactly) or inside a plugin as `<plugin>:grill-with-docs`
+        // (matches via the `:name` suffix). Without the suffix form, plugin
+        // skills are silently ignored — the Grilling Session would start with
+        // no skill loaded.
+        ...(skill ? { skills: skillEntries(skill) } : {}),
         ...(model ? { model } : {}),
       },
     });
