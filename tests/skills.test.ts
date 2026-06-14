@@ -6,6 +6,7 @@ import { fsSkillSource, type SkillSource } from '../src/server/skills';
 import { openDb } from '../src/server/db';
 import { createApp } from '../src/server/app';
 import { FakeAgent } from '../src/server/fake-agent';
+import { skillEntries } from '../src/server/sdk-agent';
 
 /** Builds a fake ~/.claude layout in a temp dir (the injectable seam). */
 function makeClaudeDir() {
@@ -96,5 +97,20 @@ describe('GET /api/skills', () => {
 
     expect(res.status).toBe(500);
     expect((await res.json()).error).toContain('disk on fire');
+  });
+});
+
+describe('skillEntries — feeding a bare skill name to the SDK', () => {
+  // Regression for #92: a Grilling Session named `grill-with-docs` silently
+  // started with no skill because the plugin-installed copy is registered as
+  // `mattpocock-skills:grill-with-docs`, which an exact-name SDK match misses.
+  it('expands a bare name to both the exact name and the `:name` suffix form', () => {
+    expect(skillEntries('grill-with-docs')).toEqual(['grill-with-docs', ':grill-with-docs']);
+  });
+
+  it('passes a pre-qualified `plugin:skill` name through unchanged', () => {
+    expect(skillEntries('mattpocock-skills:grill-with-docs')).toEqual([
+      'mattpocock-skills:grill-with-docs',
+    ]);
   });
 });
