@@ -929,6 +929,84 @@ body {
   background: rgba(207, 157, 140, 0.12);
 }
 
+/* ---- worker phase stepper -------------------------------------------- *
+ * Honest substitute for a 0–100% bar: four discrete segments (Clone → Work
+ * → Push → PR) lit by lifecycle state + persisted phase. The active segment
+ * shimmers; the death segment of a failed/killed run paints red/grey over
+ * a frozen Clone→Work→Push trail.
+ */
+.cz-step {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  width: 100%;
+}
+.cz-seg {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--tx3);
+  text-decoration: none;
+}
+.cz-seg .bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  position: relative;
+}
+.cz-seg.dim .bar {
+  background: var(--bg2);
+}
+.cz-seg.done .bar {
+  background: var(--sage-d);
+  border-color: var(--sage-d);
+}
+.cz-seg.done {
+  color: var(--sage);
+}
+.cz-seg.active .bar {
+  background: linear-gradient(
+    90deg,
+    var(--tan-d) 0%,
+    var(--tan) 50%,
+    var(--tan-d) 100%
+  );
+  background-size: 200% 100%;
+  border-color: var(--tan-d);
+  animation: cz-step-shimmer 1.4s linear infinite;
+}
+.cz-seg.active {
+  color: var(--tan);
+}
+.cz-seg.red .bar {
+  background: var(--rose-d);
+  border-color: var(--rose-d);
+}
+.cz-seg.red {
+  color: var(--rose);
+}
+.cz-seg.grey .bar {
+  background: var(--tx3);
+  border-color: var(--tx3);
+}
+.cz-seg.grey {
+  color: var(--tx3);
+}
+.cz-seg.link:hover {
+  color: var(--cream);
+}
+@keyframes cz-step-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* live activity feed — monospace on a dark inset */
 .cz-feed {
   margin-top: 12px;

@@ -37,6 +37,8 @@ type RunState =
   | 'failed'
   | 'killed';
 
+type WorkerPhase = 'cloning' | 'working' | 'pushing';
+
 interface Run {
   id: number;
   issue: number;
@@ -44,6 +46,7 @@ interface Run {
   state: RunState;
   prUrl: string | null;
   failureReason: string | null;
+  phase: WorkerPhase | null;
   startedAt: string;
 }
 
@@ -63,25 +66,64 @@ interface ProjectUsage {
 
 const formatTokens = (n: number) => n.toLocaleString('en-US');
 
-const STATE_LABELS: Record<RunState, string> = {
-  cloning: 'cloning',
-  working: 'working',
-  pushing: 'pushing',
-  pr_open: 'PR open',
-  pr_merged: 'PR merged',
-  pr_closed: 'PR closed',
-  failed: 'failed',
-  killed: 'killed',
-};
-
 const ACTIVE: RunState[] = ['cloning', 'working', 'pushing'];
 
-/** Maps a run's lifecycle state to a palette tone: sage=ok, rose=error, tan=active. */
-function stateTone(state: RunState): string {
-  if (state === 'pr_open' || state === 'pr_merged') return 'ok';
-  if (state === 'failed' || state === 'pr_closed') return 'err';
-  if (state === 'killed') return 'killed';
-  return 'active';
+/**
+ * Four-segment phase stepper for a Worker run: Clone → Work → Push → PR.
+ * Driven by `state` plus the persisted furthest `phase`. The active segment
+ * shimmers; on `failed`/`killed` the death segment paints red/grey over the
+ * frozen done segments, so a run's expanded view shows where it died at a
+ * glance. `pr_open`/`pr_merged`/`pr_closed` light all four; the PR segment
+ * links out to `prUrl` when known.
+ */
+function WorkerPhaseStepper({ run }: { run: Run }) {
+  const labels = ['Clone', 'Work', 'Push', 'PR'] as const;
+  // Index of the in-progress / death segment along Clone→Work→Push.
+  const phaseIdx: Record<WorkerPhase, number> = { cloning: 0, working: 1, pushing: 2 };
+
+  const tones: Array<'done' | 'active' | 'red' | 'grey' | 'dim'> = ['dim', 'dim', 'dim', 'dim'];
+  if (ACTIVE.includes(run.state)) {
+    const idx = phaseIdx[run.state as WorkerPhase];
+    for (let i = 0; i < idx; i++) tones[i] = 'done';
+    tones[idx] = 'active';
+  } else if (run.state === 'pr_open' || run.state === 'pr_merged' || run.state === 'pr_closed') {
+    tones.fill('done');
+  } else {
+    // failed or killed: freeze done segments up to the death segment.
+    const idx = run.phase ? phaseIdx[run.phase] : 0;
+    for (let i = 0; i < idx; i++) tones[i] = 'done';
+    tones[idx] = run.state === 'killed' ? 'grey' : 'red';
+  }
+
+  return (
+    <div className="cz-step" role="group" aria-label="Worker phases">
+      {labels.map((label, i) => {
+        const tone = tones[i];
+        const isPr = i === 3 && tone === 'done' && run.prUrl;
+        if (isPr) {
+          return (
+            <a
+              key={label}
+              className={`cz-seg ${tone} link`}
+              href={run.prUrl!}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`${label} phase: open PR`}
+            >
+              <span className="bar" />
+              <span>{label}</span>
+            </a>
+          );
+        }
+        return (
+          <div key={label} className={`cz-seg ${tone}`} aria-label={`${label} phase: ${tone}`}>
+            <span className="bar" />
+            <span>{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 interface ActivityEntry {
@@ -696,14 +738,12 @@ export function ProjectDashboard({
         ) : (
           <div>
             {runs.map((run) => {
-              const tone = stateTone(run.state);
               const runUsage = usageByRun.get(run.id);
               return (
                 <div className="cz-run" key={run.id}>
                   <div className="row">
                     <span className="id">#{run.issue}</span>
                     <span className="nm">{run.issueTitle}</span>
-                    <span className={`state ${tone}`}>{STATE_LABELS[run.state]}</span>
                     {ACTIVE.includes(run.state) ? (
                       <button className="cz-kill" onClick={() => void killRun(run.id)}>
                         Kill
@@ -718,13 +758,9 @@ export function ProjectDashboard({
                       </button>
                     )}
                   </div>
+                  <WorkerPhaseStepper run={run} />
                   <div className="meta">
                     <span className="mono">started {run.startedAt}</span>
-                    {(run.state === 'pr_open' || run.state === 'pr_merged' || run.state === 'pr_closed') && run.prUrl && (
-                      <a href={run.prUrl} target="_blank" rel="noreferrer">
-                        view PR
-                      </a>
-                    )}
                     {runUsage && <span>{formatTokens(runUsage.totalTokens)} tokens</span>}
                     {run.state === 'failed' && run.failureReason && (
                       <span className="reason err">{run.failureReason}</span>
