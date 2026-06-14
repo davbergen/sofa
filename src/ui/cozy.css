@@ -1007,6 +1007,40 @@ body {
   100% { background-position: -200% 0; }
 }
 
+/* current-activity headline — the one-line status that beats the firehose
+   (ADR 0007: detail feed lives behind a toggle, not in the default view) */
+.cz-activity {
+  margin-top: 10px;
+}
+.cz-activity-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cz-activity-headline {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--tx2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cz-activity-toggle {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--tx3);
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.cz-activity-toggle:hover {
+  color: var(--tx1);
+  border-color: var(--tx3);
+}
+
 /* live activity feed — monospace on a dark inset */
 .cz-feed {
   margin-top: 12px;

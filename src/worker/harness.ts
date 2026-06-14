@@ -18,7 +18,16 @@ export interface CommandRunner {
   run(
     cmd: string,
     args: string[],
-    opts?: { cwd?: string; env?: Record<string, string> },
+    opts?: {
+      cwd?: string;
+      env?: Record<string, string>;
+      /**
+       * Called with each complete stdout line as it arrives, before the
+       * process closes. The full buffer is still returned in `stdout`; this
+       * is purely an opt-in observation hook for streaming output.
+       */
+      onStdoutLine?: (line: string) => void;
+    },
   ): Promise<CommandResult>;
 }
 
@@ -103,39 +112,151 @@ export function redactToken(text: string, token: string): string {
   return token ? text.split(token).join('***') : text;
 }
 
+function countTokens(x: unknown): number {
+  return typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.floor(x) : 0;
+}
+
+/** Trims an assistant text block to its first sentence (or first 160 chars). */
+function firstSentence(text: string): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  const m = cleaned.match(/^(.+?[.!?])\s/);
+  const slice = m ? m[1] : cleaned;
+  return slice.length > 160 ? `${slice.slice(0, 159)}…` : slice;
+}
+
+function shorten(text: string, max = 80): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned;
+}
+
 /**
- * Pulls the token usage out of the Claude CLI's `--output-format json` result.
- * Best-effort: unparseable output means usage stays unknown.
+ * Renders one tool_use block into the activity-feed verb form. Unknown tools
+ * fall back to `Working…` so a future SDK addition never leaks raw JSON.
  */
-export function parseAgentUsage(stdout: string): AgentUsage | undefined {
-  try {
-    const result = JSON.parse(stdout.trim()) as {
-      usage?: {
-        input_tokens?: number;
-        output_tokens?: number;
-        cache_read_input_tokens?: number;
-        cache_creation_input_tokens?: number;
-      };
-    };
-    if (typeof result !== 'object' || result === null || typeof result.usage !== 'object' || result.usage === null) {
-      return undefined;
+function describeToolUse(name: string, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>;
+  const str = (key: string) => (typeof i[key] === 'string' ? (i[key] as string) : '');
+  switch (name) {
+    case 'Edit':
+    case 'MultiEdit':
+      return `Editing ${shorten(str('file_path') || str('path'))}`;
+    case 'Write':
+      return `Writing ${shorten(str('file_path') || str('path'))}`;
+    case 'Read':
+    case 'NotebookEdit':
+      return `Reading ${shorten(str('file_path') || str('path'))}`;
+    case 'Bash':
+    case 'PowerShell': {
+      const cmd = str('command').split('\n')[0];
+      return `Bash: ${shorten(cmd, 100)}`;
     }
-    const count = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.floor(x) : 0);
-    return {
-      inputTokens: count(result.usage.input_tokens),
-      outputTokens: count(result.usage.output_tokens),
-      cacheReadTokens: count(result.usage.cache_read_input_tokens),
-      cacheCreationTokens: count(result.usage.cache_creation_input_tokens),
-    };
-  } catch {
-    return undefined;
+    case 'Grep':
+      return `Searching for "${shorten(str('pattern'), 60)}"`;
+    case 'Glob':
+      return `Finding ${shorten(str('pattern'), 60)}`;
+    case 'WebFetch':
+      return `Fetching ${shorten(str('url'), 80)}`;
+    case 'WebSearch':
+      return `Searching the web for "${shorten(str('query'), 60)}"`;
+    case 'TodoWrite':
+      return 'Updating todos';
+    case 'Task':
+      return `Delegating: ${shorten(str('description') || str('subagent_type'), 60)}`;
+    default:
+      return name ? `Working… (${name})` : 'Working…';
   }
+}
+
+interface StreamFormatter {
+  /** Parses one raw `stream-json` line and emits zero or more activity lines. */
+  handle(line: string, emit: (message: string) => void): void;
+  /** Usage captured from the final `result` event, when present. */
+  readonly usage: AgentUsage | undefined;
+}
+
+/**
+ * Stateful formatter for the Claude CLI's `--output-format stream-json` lines.
+ * Emits one activity line per tool_use, condenses assistant prose to its first
+ * sentence, drops tool_result bodies (the firehose) except errors, and picks
+ * the token usage out of the final `result` event.
+ *
+ * Why this lives in the harness (not the adapter): the harness owns the agent
+ * contract — same place `parseAgentUsage` used to live — so downstream
+ * (adapter, SSE, UI) keeps receiving plain `activity` strings exactly as it
+ * did when the agent's output was one end-of-run blob.
+ */
+export function makeStreamFormatter(): StreamFormatter {
+  const toolNames = new Map<string, string>();
+  let usage: AgentUsage | undefined;
+  return {
+    get usage() {
+      return usage;
+    },
+    handle(line, emit) {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let event: unknown;
+      try {
+        event = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+      if (typeof event !== 'object' || event === null) return;
+      const e = event as { type?: string; message?: unknown; usage?: unknown };
+
+      if (e.type === 'result') {
+        const u = (e.usage ?? {}) as Record<string, unknown>;
+        usage = {
+          inputTokens: countTokens(u.input_tokens),
+          outputTokens: countTokens(u.output_tokens),
+          cacheReadTokens: countTokens(u.cache_read_input_tokens),
+          cacheCreationTokens: countTokens(u.cache_creation_input_tokens),
+        };
+        return;
+      }
+
+      if (e.type === 'assistant' && typeof e.message === 'object' && e.message !== null) {
+        const content = (e.message as { content?: unknown[] }).content ?? [];
+        for (const block of content) {
+          if (typeof block !== 'object' || block === null) continue;
+          const b = block as { type?: string; text?: unknown; name?: unknown; id?: unknown; input?: unknown };
+          if (b.type === 'text' && typeof b.text === 'string') {
+            const sentence = firstSentence(b.text);
+            if (sentence) emit(sentence);
+          } else if (b.type === 'tool_use' && typeof b.name === 'string') {
+            if (typeof b.id === 'string') toolNames.set(b.id, b.name);
+            emit(describeToolUse(b.name, b.input));
+          }
+        }
+        return;
+      }
+
+      if (e.type === 'user' && typeof e.message === 'object' && e.message !== null) {
+        const content = (e.message as { content?: unknown[] }).content ?? [];
+        for (const block of content) {
+          if (typeof block !== 'object' || block === null) continue;
+          const b = block as { type?: string; is_error?: unknown; tool_use_id?: unknown };
+          // Only surface tool errors — never the raw tool_result body.
+          if (b.type === 'tool_result' && b.is_error === true) {
+            const id = typeof b.tool_use_id === 'string' ? b.tool_use_id : '';
+            const toolName = toolNames.get(id) ?? 'tool';
+            emit(`⚠ ${toolName} failed`);
+          }
+        }
+      }
+    },
+  };
 }
 
 /**
  * Creates an Agent that invokes the Claude CLI non-interactively. The argv
  * construction is the unit-testable seam: inject a fake runner and assert on
  * which flags appear, including `--model` when a model alias is given.
+ *
+ * The agent uses `--output-format stream-json --verbose` so the harness can
+ * surface live activity as the agent works (per ADR 0007) — token usage is
+ * read off the stream's final `result` event, not from a buffered blob.
  */
 export function makeClaudeAgent(
   runner: CommandRunner,
@@ -144,16 +265,28 @@ export function makeClaudeAgent(
 ): Agent {
   return {
     async implementIssue({ cwd, prompt }) {
-      const args = ['-p', prompt, '--permission-mode', 'bypassPermissions', '--output-format', 'json'];
+      const args = [
+        '-p', prompt,
+        '--permission-mode', 'bypassPermissions',
+        '--output-format', 'stream-json',
+        '--verbose',
+      ];
       if (model) {
         args.push('--model', model);
       }
-      const result = await runner.run('claude', args, { cwd });
-      log?.(result.stdout + result.stderr);
+      const formatter = makeStreamFormatter();
+      const result = await runner.run('claude', args, {
+        cwd,
+        onStdoutLine: (line) =>
+          formatter.handle(line, (message) => log?.(`${message}\n`)),
+      });
+      if (result.stderr) {
+        log?.(result.stderr);
+      }
       if (result.code !== 0) {
         throw new Error(`claude exited ${result.code}: ${(result.stderr || result.stdout).trim().slice(0, 500)}`);
       }
-      return parseAgentUsage(result.stdout);
+      return formatter.usage;
     },
   };
 }
