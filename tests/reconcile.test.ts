@@ -14,9 +14,14 @@ import type {
 } from '../src/server/ports';
 
 type PrState = 'OPEN' | 'MERGED' | 'CLOSED';
+type OpenPr = { issue: number; prNumber: number; prUrl: string };
 
-function makeGitHub(prStateByUrl: Map<string, PrState | Error>) {
+function makeGitHub(
+  prStateByUrl: Map<string, PrState | Error>,
+  openPrs: OpenPr[] | Error = [],
+) {
   const lookups: Array<{ dir: string; prUrl: string }> = [];
+  const openPrLookups: string[] = [];
   const github: GitHubAdapter = {
     resolveRepo: () => Promise.resolve('davbergen/scratch'),
     listReadyIssues: () => Promise.resolve([]),
@@ -29,8 +34,13 @@ function makeGitHub(prStateByUrl: Map<string, PrState | Error>) {
       if (!result) return Promise.reject(new Error(`no fake state for ${prUrl}`));
       return Promise.resolve(result);
     },
+    listOpenPrsByIssue(dir) {
+      openPrLookups.push(dir);
+      if (openPrs instanceof Error) return Promise.reject(openPrs);
+      return Promise.resolve(openPrs);
+    },
   };
-  return { github, lookups };
+  return { github, lookups, openPrLookups };
 }
 
 function fakeContainer() {
@@ -46,12 +56,15 @@ function fakeContainer() {
   return { container, launches, emit: (event: WorkerEvent) => onEvent?.(event) };
 }
 
-function makeHarness(prStateByUrl: Map<string, PrState | Error> = new Map()) {
-  const { github, lookups } = makeGitHub(prStateByUrl);
+function makeHarness(
+  prStateByUrl: Map<string, PrState | Error> = new Map(),
+  openPrs: OpenPr[] | Error = [],
+) {
+  const { github, lookups, openPrLookups } = makeGitHub(prStateByUrl, openPrs);
   const { container, emit } = fakeContainer();
   const deps: AppDeps = { github, container };
   const app = createApp(openDb(':memory:'), new FakeAgent(), deps);
-  return { app, lookups, emit };
+  return { app, lookups, openPrLookups, emit };
 }
 
 async function openProject(app: ReturnType<typeof makeHarness>['app']) {
@@ -114,8 +127,8 @@ describe('POST /api/projects/:id/reconcile', () => {
     const res = await h.app.request(`/api/projects/${project.id}/reconcile`, { method: 'POST' });
 
     expect(res.status).toBe(200);
-    const runs = (await res.json()) as Run[];
-    const byIssue = new Map(runs.map((r) => [r.issue, r.state]));
+    const body = (await res.json()) as { runs: Run[]; issuesWithOpenPr: OpenPr[] };
+    const byIssue = new Map(body.runs.map((r) => [r.issue, r.state]));
     expect(byIssue.get(7)).toBe('pr_merged');
     expect(byIssue.get(9)).toBe('pr_closed');
     expect(byIssue.get(11)).toBe('pr_open');
@@ -158,5 +171,38 @@ describe('POST /api/projects/:id/reconcile', () => {
     const h = makeHarness();
     const res = await h.app.request('/api/projects/999/reconcile', { method: 'POST' });
     expect(res.status).toBe(404);
+  });
+
+  it('returns the set of open PRs keyed by issue number so Dispatch can be greyed out', async () => {
+    const openPrs: OpenPr[] = [
+      { issue: 7, prNumber: 101, prUrl: 'https://example.com/pr/101' },
+      { issue: 9, prNumber: 102, prUrl: 'https://example.com/pr/102' },
+    ];
+    const h = makeHarness(new Map(), openPrs);
+    const { project } = await openProject(h.app);
+
+    const res = await h.app.request(`/api/projects/${project.id}/reconcile`, { method: 'POST' });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { runs: Run[]; issuesWithOpenPr: OpenPr[] };
+    expect(body.issuesWithOpenPr).toEqual(openPrs);
+    expect(body.runs).toEqual([]);
+    expect(h.openPrLookups).toHaveLength(1);
+  });
+
+  it('502s when listing open PRs fails and leaves run state unchanged', async () => {
+    // The pr_open run's `getPrState` returns OPEN, so the first pass is a
+    // no-op and the failure surfaces from the open-PR list step alone.
+    const prStates = new Map<string, PrState>([['https://example.com/pr/7', 'OPEN']]);
+    const h = makeHarness(prStates, new Error('gh pr list failed (exit 4)'));
+    const { project } = await openProject(h.app);
+    await dispatchAndOpenPr(h.app, h.emit, project.id, 7, 'https://example.com/pr/7');
+
+    const res = await h.app.request(`/api/projects/${project.id}/reconcile`, { method: 'POST' });
+
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toContain('gh pr list failed');
+    const runs = (await (await h.app.request(`/api/projects/${project.id}/runs`)).json()) as Run[];
+    expect(runs[0].state).toBe('pr_open');
   });
 });

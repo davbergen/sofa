@@ -10,7 +10,13 @@
  */
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ContainerAdapter, GitHubAdapter, ReadyIssue, WorkerEvent } from './ports.js';
+import type {
+  ContainerAdapter,
+  GitHubAdapter,
+  OpenPrForIssue,
+  ReadyIssue,
+  WorkerEvent,
+} from './ports.js';
 import { coerceUsage } from './usage.js';
 
 interface ExecResult {
@@ -97,6 +103,29 @@ export function ghGitHubAdapter(): GitHubAdapter {
         throw new Error(`gh pr view returned unexpected state: ${state || '(empty)'}`);
       }
       return state;
+    },
+
+    async listOpenPrsByIssue(dir) {
+      const res = await exec(
+        'gh',
+        ['pr', 'list', '--state', 'open', '--json', 'number,headRefName,url'],
+        dir,
+      );
+      if (res.code !== 0) {
+        throw new Error(`gh pr list failed (exit ${res.code}): ${res.stderr.trim().slice(0, 300)}`);
+      }
+      const rows = JSON.parse(res.stdout) as Array<{
+        number: number;
+        headRefName: string;
+        url: string;
+      }>;
+      const out: OpenPrForIssue[] = [];
+      for (const row of rows) {
+        const match = /^issue-(\d+)-/.exec(row.headRefName);
+        if (!match) continue;
+        out.push({ issue: Number(match[1]), prNumber: row.number, prUrl: row.url });
+      }
+      return out;
     },
 
     async ensureLabels(dir, labels) {

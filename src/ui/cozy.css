@@ -773,6 +773,20 @@ body {
   color: var(--tx3);
 }
 
+/* Ready Issue annotation: shown when a PR for the Issue is already open, so
+   Dispatch is greyed out and the user can jump to the live PR instead. */
+.cz-pr-link {
+  font-size: 11px;
+  font-family: 'Spline Sans Mono', monospace;
+  color: var(--tan);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin-top: 6px;
+}
+.cz-pr-link:hover {
+  color: var(--cream);
+}
+
 /* Create Issue confirm/edit step — pre-filled title/body, tweak before filing */
 .cz-fn-issue {
   display: flex;

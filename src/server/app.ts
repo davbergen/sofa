@@ -628,11 +628,19 @@ export function createApp(
     return c.json({ workerModel: row?.worker_model ?? null, sessionModel: row?.session_model ?? null });
   });
 
-  // On-demand reconciliation: re-read GitHub PR truth for every `pr_open` run
-  // of this Project, advancing each to `pr_merged` or `pr_closed` as warranted.
-  // The dashboard's 2s active-poll never touches GitHub; reconciliation runs on
-  // mount and on a manual Refresh. Fail-soft: if any `gh` lookup throws, no
-  // record is overwritten and a 502 surfaces the reason for the banner.
+  // On-demand reconciliation: re-read GitHub PR truth for this Project so both
+  // the Worker Runs panel and Ready Issues catch up to what GitHub says.
+  //
+  // Two passes happen in one trip:
+  //   1. Advance every `pr_open` run record to `pr_merged` / `pr_closed` based
+  //      on the linked PR's current state (the #81 mechanism).
+  //   2. Build the set of open PRs keyed by the Issue number they implement
+  //      (via the `issue-<n>-*` branch convention), so the UI can grey out
+  //      Dispatch on a Ready Issue that already has a PR in flight.
+  //
+  // Runs on mount + manual Refresh; never folded into the 2s active-poll.
+  // Fail-soft: if any `gh` lookup throws, no record is overwritten and a 502
+  // surfaces the reason for the banner.
   app.post('/api/projects/:id/reconcile', async (c) => {
     if (!deps) {
       return c.json({ error: 'GitHub adapter not configured' }, 500);
@@ -644,6 +652,7 @@ export function createApp(
     const candidates = db
       .prepare(`SELECT id, pr_url FROM worker_runs WHERE project_id = ? AND state = 'pr_open'`)
       .all(project.id) as unknown as Array<{ id: number; pr_url: string | null }>;
+    let issuesWithOpenPr: Array<{ issue: number; prNumber: number; prUrl: string }> = [];
     try {
       for (const row of candidates) {
         if (!row.pr_url) continue;
@@ -652,6 +661,7 @@ export function createApp(
         if (!update) continue;
         db.prepare('UPDATE worker_runs SET state = ? WHERE id = ?').run(update.state, row.id);
       }
+      issuesWithOpenPr = await deps.github.listOpenPrsByIssue(project.dir);
     } catch (err) {
       return c.json(
         { error: `reconciling PR state failed: ${err instanceof Error ? err.message : String(err)}` },
@@ -661,7 +671,7 @@ export function createApp(
     const rows = db
       .prepare(`SELECT ${RUN_COLUMNS} FROM worker_runs WHERE project_id = ? ORDER BY id DESC`)
       .all(project.id) as unknown as RunRow[];
-    return c.json(rows.map(toRun));
+    return c.json({ runs: rows.map(toRun), issuesWithOpenPr });
   });
 
   app.get('/api/projects/:id/runs', (c) => {
