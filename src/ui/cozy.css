@@ -82,10 +82,6 @@ body {
   padding: 38px clamp(20px, 4vw, 46px) 56px;
 }
 
-.cz-app.wide {
-  max-width: 1320px;
-}
-
 .mono {
   font-family: 'Spline Sans Mono', ui-monospace, monospace;
 }
@@ -1213,16 +1209,6 @@ body {
   margin: 0 0 14px;
 }
 
-.cz-split {
-  display: flex;
-  gap: 18px;
-  align-items: stretch;
-}
-.cz-split > .main {
-  flex: 1;
-  min-width: 0;
-}
-
 .cz-cush.cz-transcript {
   background: var(--term-screen);
 }
@@ -1477,6 +1463,33 @@ body {
 .cz-rail .cz-grid {
   /* The dashboard grid collapses to a single column in the narrow rail. */
   grid-template-columns: 1fr;
+}
+/* Rail tab strip — Dashboard | PRD. Only rendered once a PRD draft exists. */
+.cz-rail-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 3px;
+}
+.cz-rail-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: var(--tx2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.cz-rail-tab.on {
+  background: var(--tan);
+  color: #2a1d0f;
 }
 .cz-rail .cz-card.tall {
   grid-row: auto;
