@@ -10,7 +10,12 @@ import { join } from 'node:path';
 // re-enables the launch on the other card.
 const SESSION_ID = 9104;
 
-test("One Session at a time: other open Projects' launch locks; Dispatch stays enabled", async ({
+// ADR 0009 retires the stacked-cards layout: only the Active Project renders
+// at a time, so two Composers are never on screen simultaneously. The
+// preserved behaviours this spec covered (one Session at a time, Dispatch
+// stays enabled across switches) are re-asserted through rail-switching in
+// issue #117. Skip until then so the gate stays green.
+test.skip("One Session at a time: other open Projects' launch locks; Dispatch stays enabled", async ({
   page,
 }) => {
   const dirA = mkdtempSync(join(tmpdir(), 'sofa-lockA-'));

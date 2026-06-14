@@ -82,6 +82,150 @@ body {
   padding: 38px clamp(20px, 4vw, 46px) 56px;
 }
 
+/* ---- Project Rail shell ----------------------------------------------- *
+ * Two columns: a fixed Project Rail on the left listing every open Project,
+ * and a fluid main pane that renders exactly one Active Project at a time
+ * (ADR 0009). The rail also hosts the open-Project field, so opening and
+ * switching share one surface. */
+.cz-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+.cz-projrail {
+  flex: 0 0 264px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 16px 22px 18px;
+  border-right: 1px solid var(--line);
+  background: linear-gradient(180deg, #1a1410, #14100c);
+}
+.cz-railhead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 4px 8px;
+}
+.cz-railhead .cz-word {
+  font-size: 22px;
+}
+.cz-railhead .cz-sub {
+  letter-spacing: 0.6px;
+  margin-top: 2px;
+}
+.cz-rail-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.cz-rail-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cz-rail-empty {
+  padding: 8px 6px;
+  font-size: 12.5px;
+}
+.cz-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--tx);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cz-rail-item:hover {
+  background: var(--cush);
+  color: var(--cream);
+}
+.cz-rail-item.active {
+  background: linear-gradient(168deg, var(--cush2), var(--cush));
+  border-color: var(--tan-d);
+  color: var(--cream);
+}
+.cz-rail-item .av {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--tan);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cz-rail-item .meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cz-rail-item .nm {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cz-rail-item .pa {
+  font-size: 10.5px;
+  color: var(--tx3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+.cz-rail-item .live-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sage);
+  box-shadow: 0 0 9px var(--sage);
+  animation: cz-pulse 1.8s infinite;
+}
+.cz-rail-open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cz-rail-open .cz-field {
+  font-size: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+.cz-rail-open-actions {
+  display: flex;
+  gap: 8px;
+}
+.cz-rail-open-actions .cz-btn {
+  flex: 1;
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  border-radius: 10px;
+}
+.cz-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 32px clamp(20px, 4vw, 46px) 56px;
+}
+.cz-main-empty {
+  padding: 28px 4px;
+  font-size: 14px;
+}
+
 .mono {
   font-family: 'Spline Sans Mono', ui-monospace, monospace;
 }
@@ -1408,16 +1552,11 @@ body {
  * terminal-surface tokens (`--term-*`, `--tag-*`, `--ask-*`, traffic lights)
  * are defined once at the top of this file. */
 
-/* Other open cards stay on screen but recede while a Session is live. The
- * launch controls in the receded card's Composer are locked (ADR 0008: one
- * interactive Session at a time); Dispatch on the dashboard grid below stays
- * enabled so the Ralph Loop keeps running on every Project. */
-.cz-project.receded {
-  opacity: 0.5;
-  filter: saturate(0.75);
-  transition: opacity 0.3s ease;
-}
-
+/* One Active Project at a time (ADR 0009): when a live Session belongs to a
+ * Project other than the Active one, the Active Project's Composer locks (the
+ * `.cz-composer-lockhint` row appears below it). The "receded" greying that
+ * used to fade sibling cards is retired with the stacked layout — only one
+ * Project's dashboard is on screen at a time, so there is nothing to recede. */
 .cz-composer-lockhint {
   margin: 8px 0 0;
   font-size: 12.5px;
