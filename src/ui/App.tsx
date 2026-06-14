@@ -473,7 +473,6 @@ function ProjectCard({
   onPromptChange,
   onSkillChange,
   onToggleDashboard,
-  onStart,
   onLoadSessions,
   onStartSession,
   onViewSession,
@@ -490,23 +489,23 @@ function ProjectCard({
   onPromptChange: (value: string) => void;
   onSkillChange: (value: string) => void;
   onToggleDashboard: () => void;
-  onStart: () => void;
   onLoadSessions: () => void;
   onStartSession: (prompt: string, skill?: string) => Promise<number>;
   onViewSession: (sessionId: number) => void;
 }) {
-  const [heroSeed, setHeroSeed] = useState('');
+  const [mode, setMode] = useState<'grill' | 'session'>('grill');
+  const trimmed = prompt.trim();
 
-  async function submitHero(e: FormEvent) {
+  async function submitComposer(e: FormEvent) {
     e.preventDefault();
-    const seed = heroSeed.trim();
-    if (!seed) return;
+    if (!trimmed) return;
+    const launchSkill = mode === 'grill' ? 'grill-with-docs' : skill || undefined;
     try {
-      await onStartSession(seed, 'grill-with-docs');
-      setHeroSeed('');
+      await onStartSession(trimmed, launchSkill);
+      onPromptChange('');
     } catch {
       // startSessionWith surfaces the error in the page-level banner; keep the
-      // seed in the field so the user can retry without retyping it.
+      // prompt in the field so the user can retry without retyping it.
     }
   }
 
@@ -561,54 +560,74 @@ function ProjectCard({
         </div>
       ) : (
         <>
-          <form className="cz-cush cz-hero cz-accent" onSubmit={submitHero} aria-label="Start a Grilling Session">
-        <label className="cz-hero-label" htmlFor={`hero-seed-${project.id}`}>
-          What do you want to work on today?
-        </label>
-        <div className="cz-hero-row">
-          <input
-            id={`hero-seed-${project.id}`}
-            aria-label="Grilling Session seed"
-            className="cz-hero-input"
-            placeholder="e.g. The UI needs fixing"
-            value={heroSeed}
-            onChange={(e) => setHeroSeed(e.target.value)}
-          />
-          <button type="submit" className="cz-btn tan" disabled={!heroSeed.trim()}>
-            Start Grilling
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 3l14 9-14 9z" />
-            </svg>
-          </button>
-        </div>
-      </form>
-
-      <div className="cz-cush cz-dispatch cz-dispatch-secondary">
-        <input
-          aria-label="Session prompt"
-          className="cz-prompt"
-          placeholder="What should the Session do?"
-          value={prompt}
-          onChange={(e) => onPromptChange(e.target.value)}
-        />
-        <label className="cz-skill">
-          <span className="k">Skill</span>
-          <select aria-label="Session skill" value={skill} onChange={(e) => onSkillChange(e.target.value)}>
-            <option value="">(no skill)</option>
-            {skills.map((s) => (
-              <option key={s.name} value={s.name} title={s.description}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" className="cz-btn tan" disabled={!prompt.trim()} onClick={onStart}>
-          Start Session
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 3l14 9-14 9z" />
-          </svg>
-        </button>
-      </div>
+          <form
+            className="cz-cush cz-hero cz-accent cz-composer"
+            onSubmit={submitComposer}
+            aria-label="Start a Grilling Session or Session"
+          >
+            <div
+              className="cz-composer-toggle"
+              role="radiogroup"
+              aria-label="Composer mode"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={mode === 'grill'}
+                className={`cz-composer-tab${mode === 'grill' ? ' on' : ''}`}
+                onClick={() => setMode('grill')}
+              >
+                <span aria-hidden="true">◐</span> Grill
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={mode === 'session'}
+                className={`cz-composer-tab${mode === 'session' ? ' on' : ''}`}
+                onClick={() => setMode('session')}
+              >
+                <span aria-hidden="true">✲</span> Session
+              </button>
+            </div>
+            <label className="cz-hero-label" htmlFor={`composer-prompt-${project.id}`}>
+              {mode === 'grill'
+                ? 'What do you want to work on today?'
+                : 'What should the Session do?'}
+            </label>
+            <div className="cz-hero-row">
+              <input
+                id={`composer-prompt-${project.id}`}
+                aria-label={mode === 'grill' ? 'Grilling Session seed' : 'Session prompt'}
+                className="cz-hero-input"
+                placeholder={mode === 'grill' ? 'e.g. The UI needs fixing' : 'e.g. tidy the README'}
+                value={prompt}
+                onChange={(e) => onPromptChange(e.target.value)}
+              />
+              {mode === 'session' && (
+                <label className="cz-skill">
+                  <span className="k">Skill</span>
+                  <select
+                    aria-label="Session skill"
+                    value={skill}
+                    onChange={(e) => onSkillChange(e.target.value)}
+                  >
+                    <option value="">(no skill)</option>
+                    {skills.map((s) => (
+                      <option key={s.name} value={s.name} title={s.description}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <button type="submit" className="cz-btn tan" disabled={!trimmed}>
+                {mode === 'grill' ? 'Start Grilling' : 'Start Session'}
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 3l14 9-14 9z" />
+                </svg>
+              </button>
+            </div>
+          </form>
 
           {dashboardOpen && (
             <ProjectDashboard
@@ -949,14 +968,6 @@ export function App() {
     return started.id as number;
   }
 
-  async function startSession(project: Project) {
-    setError(null);
-    const prompt = promptFor(project.id);
-    const skill = skillByProject[project.id] ?? '';
-    await startSessionWith(project, prompt, skill || undefined);
-    setPrompts((prev) => ({ ...prev, [project.id]: '' }));
-  }
-
   async function viewSessionById(projectId: number, sessionId: number) {
     setError(null);
     const res = await fetch(`/api/sessions/${sessionId}/transcript`);
@@ -1192,7 +1203,6 @@ export function App() {
               onPromptChange={(value) => setPrompts((prev) => ({ ...prev, [p.id]: value }))}
               onSkillChange={(value) => setSkillByProject((prev) => ({ ...prev, [p.id]: value }))}
               onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
-              onStart={() => void startSession(p)}
               onLoadSessions={() => void loadSessions(p)}
               onStartSession={(prompt, skill) => startSessionWith(p, prompt, skill)}
               onViewSession={(sessionId) => void viewSessionById(p.id, sessionId)}
