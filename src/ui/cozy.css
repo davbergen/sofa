@@ -983,6 +983,48 @@ body {
   color: var(--tx3);
 }
 
+/* Inline manual-append row: a small input + button at the top of the Field
+   Notes drop target, so an Item can be typed in without a drag. */
+.cz-fn-append {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.cz-fn-append-input {
+  flex: 1;
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 12px;
+  color: var(--cream);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1.5px solid var(--seam);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.cz-fn-append-input:focus {
+  outline: none;
+  border-color: var(--sage);
+}
+
+/* Acted Item one-liner: tag, link, text (single-line, ellipsis), Remove. */
+.cz-fn-acted-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  padding: 6px 10px;
+}
+.cz-fn-acted-line .cz-fn-acted-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--tx3);
+  text-decoration: line-through;
+}
+
 /* Ready Issue annotation: shown when a PR for the Issue is already open, so
    Dispatch is greyed out and the user can jump to the live PR instead. */
 .cz-pr-link {

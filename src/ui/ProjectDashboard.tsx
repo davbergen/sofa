@@ -266,6 +266,9 @@ export function ProjectDashboard({
   // The Item currently in the "Create Issue" confirm/edit step, with its
   // editable title/body pre-filled from the Item. Null when no Item is being filed.
   const [filing, setFiling] = useState<{ id: number; title: string; body: string } | null>(null);
+  // Inline manual-append draft: the text being typed for the next Field Note
+  // Item. Empty by default; cleared after a successful append.
+  const [appendDraft, setAppendDraft] = useState('');
   const [workerModel, setWorkerModel] = useState<string | null>(null);
   const [sessionModel, setSessionModel] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -449,6 +452,27 @@ export function ProjectDashboard({
     await refreshRuns();
   }
 
+  // Append a manually-typed Item to the current note. If no note exists yet the
+  // server creates one (hasNote flips true). On success the input is cleared so
+  // David can keep typing more without an extra click.
+  async function appendItem() {
+    const text = appendDraft.trim();
+    if (!text) return;
+    setNotesError(null);
+    const res = await fetch(`/api/projects/${projectId}/field-notes/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (res.ok) {
+      setNotes(await res.json());
+      setAppendDraft('');
+    } else {
+      const body = await res.json().catch(() => null);
+      setNotesError((body as { error?: string } | null)?.error ?? `append failed (${res.status})`);
+    }
+  }
+
   async function refreshNotes() {
     const res = await fetch(`/api/projects/${projectId}/field-notes`);
     if (res.ok) setNotes(await res.json());
@@ -533,6 +557,32 @@ export function ProjectDashboard({
           onDragLeave={() => setDragging(false)}
           onDrop={(e) => void onDropNote(e)}
         >
+          {/* Inline manual append: a single Item typed in directly, without a
+              drag. Identical to a parsed Item once added — same actions, same
+              persistence. Submitting on the empty state creates the note. */}
+          <form
+            className="cz-fn-append"
+            aria-label="Append Field Note Item"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void appendItem();
+            }}
+          >
+            <input
+              className="cz-fn-append-input"
+              aria-label="New Field Note Item text"
+              placeholder="add an Item"
+              value={appendDraft}
+              onChange={(e) => setAppendDraft(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="cz-disp"
+              disabled={!appendDraft.trim()}
+            >
+              Add Item
+            </button>
+          </form>
           {!notes || !notes.hasNote ? (
             <div className="cz-empty">
               <div className="t">Drop a .txt note here</div>
@@ -545,15 +595,18 @@ export function ProjectDashboard({
             </div>
           ) : (
             <div className="cz-fn">
-              {notes.items.map((item) => (
-                <div className={`cz-issue${item.acted ? ' cz-fn-acted' : ''}`} key={item.id}>
-                  <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
-                    {item.text}
-                  </div>
-                  {/* Acted is terminal: show what the Item became and hide its
-                      actions, so it can't be Grilled or filed twice. */}
-                  {item.acted && (
-                    <div className="cz-fn-meta">
+              {notes.items.map((item) => {
+                // Acted Items collapse to a single dense one-liner — the tag,
+                // the Issue/Session link, the Item text (single-line, ellipsis
+                // on overflow), and a Remove. The action row is gone since the
+                // Item is terminal. Unacted Items keep their full layout.
+                if (item.acted) {
+                  return (
+                    <div
+                      className="cz-issue cz-fn-acted cz-fn-acted-line"
+                      key={item.id}
+                      aria-label="Acted Field Note Item"
+                    >
                       <span className="cz-fn-tag">
                         {item.action === 'issue' ? 'Filed' : 'Grilled'}
                       </span>
@@ -579,6 +632,9 @@ export function ProjectDashboard({
                       {item.action !== 'issue' && item.sessionId && !onViewSession && (
                         <span className="cz-fn-sess-label">Session #{item.sessionId}</span>
                       )}
+                      <span className="cz-fn-acted-text" title={item.text}>
+                        {item.text}
+                      </span>
                       <button
                         type="button"
                         className="cz-disp"
@@ -587,8 +643,14 @@ export function ProjectDashboard({
                         Remove
                       </button>
                     </div>
-                  )}
-                  {!item.acted && filing?.id === item.id ? (
+                  );
+                }
+                return (
+                <div className="cz-issue" key={item.id}>
+                  <div className="txt" style={{ whiteSpace: 'pre-wrap' }}>
+                    {item.text}
+                  </div>
+                  {filing?.id === item.id ? (
                     // Create Issue confirm/edit step: pre-filled from the Item,
                     // editable before filing. No LLM call — just a tweak-and-file.
                     <div className="cz-fn-issue">
@@ -631,42 +693,41 @@ export function ProjectDashboard({
                       </div>
                     </div>
                   ) : (
-                    !item.acted && (
-                      <div className="cz-fn-acts">
-                        {onStartSession && (
-                          <button
-                            type="button"
-                            className="cz-disp"
-                            onClick={() => void grillItem(item)}
-                          >
-                            Grill
-                          </button>
-                        )}
+                    <div className="cz-fn-acts">
+                      {onStartSession && (
                         <button
                           type="button"
                           className="cz-disp"
-                          onClick={() =>
-                            setFiling({
-                              id: item.id,
-                              title: item.text.split('\n')[0],
-                              body: item.text,
-                            })
-                          }
+                          onClick={() => void grillItem(item)}
                         >
-                          Create Issue
+                          Grill
                         </button>
-                        <button
-                          type="button"
-                          className="cz-disp"
-                          onClick={() => void removeItem(item.id)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    )
+                      )}
+                      <button
+                        type="button"
+                        className="cz-disp"
+                        onClick={() =>
+                          setFiling({
+                            id: item.id,
+                            title: item.text.split('\n')[0],
+                            body: item.text,
+                          })
+                        }
+                      >
+                        Create Issue
+                      </button>
+                      <button
+                        type="button"
+                        className="cz-disp"
+                        onClick={() => void removeItem(item.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
