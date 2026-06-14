@@ -43,6 +43,15 @@ the label is the boundary — an Issue carries `ready-for-agent`, a PRD carries
 `prd`. A PRD is never an Issue.
 _Avoid_: ticket, task
 
+**Dispatchable Issue**:
+An Issue eligible for a Worker to pick up *right now*: **open**, carrying
+**`ready-for-agent`**, and with **no open PR** linked via the `issue-<n>-*`
+branch convention (and the Project has no active Worker holding its single
+slot). An Issue with an open PR stays visible in Ready Issues but is shown
+with Dispatch disabled and a link to the live PR — never hidden — so it can't
+be silently re-dispatched while review is in flight.
+_Avoid_: ready (overloaded: the label name, not the live eligibility)
+
 **Worker**:
 An autonomous, containerized Session that implements exactly one Issue and
 opens one pull request, then dies. Authenticates to Anthropic with a

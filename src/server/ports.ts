@@ -45,6 +45,22 @@ export interface GitHubAdapter {
    * `pr_open` runs past the point a Worker can see.
    */
   getPrState(dir: string, prUrl: string): Promise<'OPEN' | 'MERGED' | 'CLOSED'>;
+  /**
+   * Lists every open PR in the Project's repository and maps each one back to
+   * the Issue number it implements via the `issue-<n>-*` branch convention
+   * (the same convention `automerge.yml` trusts to close the linked Issue).
+   * PRs whose head branch doesn't match the convention are skipped, so
+   * out-of-band PRs don't gate anything. Used by reconciliation to mark Ready
+   * Issues that already have a PR in flight as non-dispatchable.
+   */
+  listOpenPrsByIssue(dir: string): Promise<OpenPrForIssue[]>;
+}
+
+/** An open PR mapped to the Issue number it implements. */
+export interface OpenPrForIssue {
+  issue: number;
+  prNumber: number;
+  prUrl: string;
 }
 
 /** Lifecycle phases a running Worker reports before it finishes. */

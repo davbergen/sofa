@@ -21,6 +21,12 @@ interface ReadyIssue {
   url: string;
 }
 
+interface OpenPrForIssue {
+  issue: number;
+  prNumber: number;
+  prUrl: string;
+}
+
 type RunState =
   | 'cloning'
   | 'working'
@@ -180,6 +186,7 @@ export function ProjectDashboard({
   const [usage, setUsage] = useState<ProjectUsage | null>(null);
   const [killError, setKillError] = useState<string | null>(null);
   const [reconcileError, setReconcileError] = useState<string | null>(null);
+  const [openPrByIssue, setOpenPrByIssue] = useState<Map<number, OpenPrForIssue>>(new Map());
   const [notes, setNotes] = useState<FieldNotes | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -244,7 +251,9 @@ export function ProjectDashboard({
     setReconcileError(null);
     const res = await fetch(`/api/projects/${projectId}/reconcile`, { method: 'POST' });
     if (res.ok) {
-      setRuns(await res.json());
+      const data = (await res.json()) as { runs: Run[]; issuesWithOpenPr: OpenPrForIssue[] };
+      setRuns(data.runs);
+      setOpenPrByIssue(new Map(data.issuesWithOpenPr.map((p) => [p.issue, p])));
     } else {
       const body = await res.json().catch(() => null);
       setReconcileError(body?.error ?? `reconcile failed (${res.status})`);
@@ -615,20 +624,40 @@ export function ProjectDashboard({
         )}
         {issues && issues.length > 0 && (
           <div>
-            {issues.map((issue) => (
-              <div className="cz-issue" key={issue.number}>
-                <div className="row">
-                  <a className="id" href={issue.url} target="_blank" rel="noreferrer">
-                    #{issue.number}
-                  </a>
+            {issues.map((issue) => {
+              // An Issue with an open PR is still visible — Dispatch is greyed
+              // out and replaced by a link to the live PR, so the Issue can't
+              // be silently re-dispatched while review is in flight.
+              const openPr = openPrByIssue.get(issue.number);
+              return (
+                <div className="cz-issue" key={issue.number}>
+                  <div className="row">
+                    <a className="id" href={issue.url} target="_blank" rel="noreferrer">
+                      #{issue.number}
+                    </a>
+                  </div>
+                  <div className="txt">{issue.title}</div>
+                  <button
+                    className="cz-disp"
+                    onClick={() => void dispatchIssue(issue)}
+                    disabled={anyActive || !!openPr}
+                  >
+                    Dispatch
+                    <ArrowIcon />
+                  </button>
+                  {openPr && (
+                    <a
+                      className="cz-pr-link"
+                      href={openPr.prUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      PR #{openPr.prNumber} open →
+                    </a>
+                  )}
                 </div>
-                <div className="txt">{issue.title}</div>
-                <button className="cz-disp" onClick={() => void dispatchIssue(issue)} disabled={anyActive}>
-                  Dispatch
-                  <ArrowIcon />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
         {dispatchError && <p role="alert" className="cz-alert">{dispatchError}</p>}
