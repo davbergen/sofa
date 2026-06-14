@@ -1560,6 +1560,8 @@ body {
 
 /* the terminal frame */
 .cz-term {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   height: clamp(440px, 72vh, 860px);
@@ -1569,6 +1571,36 @@ body {
   box-shadow: 0 40px 100px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--line);
   font-family: 'JetBrains Mono', 'Spline Sans Mono', ui-monospace, monospace;
   font-size: 13.5px;
+}
+/* CRT chrome (handoff): a horizontal scanline overlay + a soft vignette,
+ * layered inside the terminal surface. Both are decorative — `pointer-events:
+ * none` keeps clicks reaching the body — and stay as static overlays under
+ * `prefers-reduced-motion: reduce` (they don't animate to begin with). */
+.cz-term::before,
+.cz-term::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.cz-term::before {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.18) 0px,
+    rgba(0, 0, 0, 0.18) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.5;
+  mix-blend-mode: multiply;
+}
+.cz-term::after {
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
 }
 
 /* title bar */
@@ -1738,6 +1770,20 @@ body {
   background: var(--tan);
   vertical-align: -3px;
   animation: cz-blink 1.05s infinite;
+}
+
+/* Reduced-motion gating for the Session Terminal: scanline + vignette chrome
+ * stay as static overlays, but every looping animation inside the terminal
+ * (cursor blink, status-dot pulse) freezes lit. Line reveal is already driven
+ * by real stream events, not a cosmetic timer, so nothing else needs gating. */
+@media (prefers-reduced-motion: reduce) {
+  .cz-term-cursor {
+    animation: none;
+    opacity: 1;
+  }
+  .cz-term-bar .live .dot {
+    animation: none;
+  }
 }
 
 /* the structured ASK block (restyled QuestionForm) */
