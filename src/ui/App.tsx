@@ -455,6 +455,93 @@ function SessionTerminal({ live }: { live: LiveSession }) {
 }
 
 /**
+ * Live-phase rail with two tabs — Dashboard | PRD. Dashboard is the default;
+ * the PRD tab appears once a `prd_draft` event arrives and auto-focuses so the
+ * draft surfaces immediately, while Dashboard stays one click away so Dispatch
+ * remains usable mid-grill.
+ */
+function SessionRail({
+  projectId,
+  live,
+  onStartSession,
+  onViewSession,
+}: {
+  projectId: number;
+  live: LiveSession;
+  onStartSession: (prompt: string, skill?: string) => Promise<number>;
+  onViewSession: (sessionId: number) => void;
+}) {
+  const hasDraft = live.prdDraft !== null;
+  const [tab, setTab] = useState<'dashboard' | 'prd'>('dashboard');
+
+  // When a draft first arrives (or is replaced after revision), auto-focus the
+  // PRD tab so the draft surfaces. A draft going away (collapse/end) restores
+  // Dashboard as the default.
+  useEffect(() => {
+    if (hasDraft) setTab('prd');
+    else setTab('dashboard');
+  }, [hasDraft]);
+
+  return (
+    <div className="cz-rail">
+      {hasDraft && (
+        <div className="cz-rail-tabs" role="tablist" aria-label="Session rail">
+          <button
+            type="button"
+            role="tab"
+            id="cz-rail-tab-dashboard"
+            aria-selected={tab === 'dashboard'}
+            aria-controls="cz-rail-panel-dashboard"
+            className={`cz-rail-tab${tab === 'dashboard' ? ' on' : ''}`}
+            onClick={() => setTab('dashboard')}
+          >
+            Dashboard
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="cz-rail-tab-prd"
+            aria-selected={tab === 'prd'}
+            aria-controls="cz-rail-panel-prd"
+            className={`cz-rail-tab${tab === 'prd' ? ' on' : ''}`}
+            onClick={() => setTab('prd')}
+          >
+            PRD
+          </button>
+        </div>
+      )}
+      {(!hasDraft || tab === 'dashboard') && (
+        <div
+          role={hasDraft ? 'tabpanel' : undefined}
+          id="cz-rail-panel-dashboard"
+          aria-labelledby={hasDraft ? 'cz-rail-tab-dashboard' : undefined}
+        >
+          <ProjectDashboard
+            projectId={projectId}
+            onStartSession={onStartSession}
+            onViewSession={onViewSession}
+          />
+        </div>
+      )}
+      {hasDraft && tab === 'prd' && live.prdDraft && (
+        <div
+          role="tabpanel"
+          id="cz-rail-panel-prd"
+          aria-labelledby="cz-rail-tab-prd"
+        >
+          <PrdPanel
+            draft={live.prdDraft}
+            published={live.prdPublished}
+            onRevise={live.onRevise}
+            onApprove={live.onApprove}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * One open Project's self-contained block. Idle, it shows the launch controls
  * (Grilling hero + secondary skill dispatch bar) over the dashboard grid. When
  * a Session is launched from it the card morphs in place (ADR 0008) into the
@@ -542,21 +629,12 @@ function ProjectCard({
           <div className="cz-term-col">
             <SessionTerminal live={liveSession} />
           </div>
-          <div className="cz-rail">
-            {liveSession.prdDraft && (
-              <PrdPanel
-                draft={liveSession.prdDraft}
-                published={liveSession.prdPublished}
-                onRevise={liveSession.onRevise}
-                onApprove={liveSession.onApprove}
-              />
-            )}
-            <ProjectDashboard
-              projectId={project.id}
-              onStartSession={onStartSession}
-              onViewSession={onViewSession}
-            />
-          </div>
+          <SessionRail
+            projectId={project.id}
+            live={liveSession}
+            onStartSession={onStartSession}
+            onViewSession={onViewSession}
+          />
         </div>
       ) : (
         <>
