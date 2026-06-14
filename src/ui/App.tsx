@@ -304,7 +304,7 @@ function ProjectCard({
         </div>
       </div>
 
-      <form className="cz-cush cz-hero" onSubmit={submitHero} aria-label="Start a Grilling Session">
+      <form className="cz-cush cz-hero cz-accent" onSubmit={submitHero} aria-label="Start a Grilling Session">
         <label className="cz-hero-label" htmlFor={`hero-seed-${project.id}`}>
           What do you want to work on today?
         </label>
@@ -819,7 +819,7 @@ export function App() {
       <header className="cz-top">
         <div className="cz-brand">
           <div className="cz-logo">
-            <SofaMark size={32} />
+            <SofaMark size={32} stroke="currentColor" />
           </div>
           <div>
             <h1 className="cz-word">Sofa</h1>

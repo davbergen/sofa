@@ -25,3 +25,15 @@ additionally make the palette themeable and shared across every screen.
 The whole UI converts to `className`; reverting to inline styling would now be
 real work. New UI is expected to use the existing tokens rather than hardcoding
 colors inline.
+
+## Note: the dashed-seam motif was retired (2026-06)
+
+The "Inline Session Terminal" overhaul re-toned the token palette to a darker
+set and **retired the signature stitched dashed-seam border** (`.cz-cush::before`)
+in favour of solid `1px` borders plus gradient accent bars (`.cz-accent`). The
+stylesheet-over-inline architecture decided here is **unchanged** — only the
+token values and that one decorative motif changed. The dashed border survives
+only where it is a functional affordance (the Field Notes drop zone and the
+empty-state ring). Terminal-surface tokens (`--term-bg`, `--term-screen`,
+`--statusline-bg`, tag colours, …) were added to the same single token set; no
+parallel theme was introduced.
