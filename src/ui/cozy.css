@@ -1026,6 +1026,25 @@ body {
   font-family: 'Spline Sans Mono', monospace;
   color: var(--tx3);
 }
+/* Process Notes Recommendation badge on an unacted Item — Grill (sage) or Cut
+   (tan), mirroring the Item's two existing actions. */
+.cz-fn-rec {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 7px;
+  padding: 2px 9px;
+  margin-top: 6px;
+  letter-spacing: 0.01em;
+}
+.cz-fn-rec-grill {
+  color: var(--sage);
+  background: rgba(163, 173, 140, 0.15);
+}
+.cz-fn-rec-issue {
+  color: var(--tan);
+  background: rgba(219, 169, 108, 0.15);
+}
 
 /* Inline manual-append row: a small input + button at the top of the Field
    Notes drop target, so an Item can be typed in without a drag. */
