@@ -23,6 +23,15 @@ export function skillEntries(skill: string): string[] {
 export interface SdkAgentOptions {
   /** Cap the number of agentic turns (useful for smoke tests). */
   maxTurns?: number;
+  /**
+   * Absolute path of a Sofa repo-bundled plugin (e.g. `sofa-skills/`) whose
+   * `skills/` are made available to the SDK *by name*, independent of the
+   * user's `~/.claude`. The SDK loads it as a `{ type: 'local' }` plugin so
+   * a bundled skill name like `triage-field-notes` resolves at runtime via
+   * the `:name` suffix form `skillEntries` emits. Omit to disable bundled
+   * skills (tests that don't exercise them).
+   */
+  bundledPluginDir?: string;
 }
 
 /**
@@ -180,6 +189,12 @@ export class SdkAgent implements Agent {
         canUseTool,
         abortController,
         resume,
+        // Make Sofa's in-repo bundled skills (see `sofa-skills/`) loadable
+        // by name. Without this, only ~/.claude skills are discoverable and
+        // a bundled name like `triage-field-notes` would silently no-op.
+        ...(this.options.bundledPluginDir
+          ? { plugins: [{ type: 'local' as const, path: this.options.bundledPluginDir }] }
+          : {}),
         // The SDK discovers skills from the same ~/.claude setup the CLI
         // uses (settingSources defaults to all sources); naming one here
         // enables it and loads its frontmatter into the system prompt.

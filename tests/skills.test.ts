@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fsSkillSource, type SkillSource } from '../src/server/skills';
+import {
+  composeSkillSources,
+  fsSkillSource,
+  repoBundledSkillSource,
+  type SkillSource,
+} from '../src/server/skills';
 import { openDb } from '../src/server/db';
 import { createApp } from '../src/server/app';
 import { FakeAgent } from '../src/server/fake-agent';
@@ -97,6 +102,64 @@ describe('GET /api/skills', () => {
 
     expect(res.status).toBe(500);
     expect((await res.json()).error).toContain('disk on fire');
+  });
+});
+
+describe('repo-bundled skill discovery', () => {
+  function makeBundleDir() {
+    return mkdtempSync(join(tmpdir(), 'sofa-bundle-'));
+  }
+
+  it('lists skills under <bundle>/skills/<name>/SKILL.md', async () => {
+    const bundle = makeBundleDir();
+    writeSkill(bundle, 'skills/triage-field-notes', 'name: triage-field-notes\ndescription: Classify Items.');
+
+    const skills = await repoBundledSkillSource(bundle).list();
+
+    expect(skills).toMatchObject([
+      { name: 'triage-field-notes', description: 'Classify Items.' },
+    ]);
+  });
+
+  it('returns an empty list when the bundle directory is missing', async () => {
+    const skills = await repoBundledSkillSource(join(makeBundleDir(), 'nope')).list();
+
+    expect(skills).toEqual([]);
+  });
+
+  it("ships sofa-skills/triage-field-notes inside the repo so Sofa's host runs don't depend on ~/.claude", async () => {
+    // The bundle directory in the running repo. The test asserts the skill
+    // exists, not the path — guards against the bundle being deleted or
+    // misnamed, which would silently break Process Notes at runtime.
+    const repoBundle = join(__dirname, '..', 'sofa-skills');
+
+    const skills = await repoBundledSkillSource(repoBundle).list();
+
+    expect(skills.map((s) => s.name)).toContain('triage-field-notes');
+  });
+});
+
+describe('composeSkillSources', () => {
+  it('merges results across sources, sorted by name', async () => {
+    const a: SkillSource = { list: async () => [{ name: 'alpha', description: 'A', path: '/a' }] };
+    const b: SkillSource = { list: async () => [{ name: 'beta', description: 'B', path: '/b' }] };
+
+    const skills = await composeSkillSources(a, b).list();
+
+    expect(skills.map((s) => s.name)).toEqual(['alpha', 'beta']);
+  });
+
+  it('lets the first source shadow a same-named skill in a later source (user wins over bundled)', async () => {
+    const user: SkillSource = {
+      list: async () => [{ name: 'triage-field-notes', description: 'user copy', path: '/u' }],
+    };
+    const bundled: SkillSource = {
+      list: async () => [{ name: 'triage-field-notes', description: 'bundled copy', path: '/b' }],
+    };
+
+    const skills = await composeSkillSources(user, bundled).list();
+
+    expect(skills).toMatchObject([{ name: 'triage-field-notes', description: 'user copy' }]);
   });
 });
 
