@@ -12,9 +12,25 @@ _Avoid_: software factory (the concept, not the name)
 
 **Project**:
 A directory Sofa has opened, like an editor's "open folder". Sofa keeps no
-central registry; multiple Projects can be open at once. A Project using the
-full pipeline must be a GitHub repository.
+central registry; multiple Projects can be open at once, but only one is the
+Active Project shown in the main pane at any time. A Project using the full
+pipeline must be a GitHub repository.
 _Avoid_: workspace, repo (a Project is identified by its directory, not its remote)
+
+**Active Project**:
+The single open Project currently rendered in the main pane. Multiple Projects
+stay open, but exactly one is Active and visible — Sofa never shows two Project
+dashboards at once. Switching the Active Project never disturbs a live Session
+in another Project: it keeps running on the host and is re-attached when its
+Project is made Active again.
+_Avoid_: selected/current project (use Active), focused (overloaded with DOM focus)
+
+**Project Rail**:
+The vertical list of open Projects down the left of the app. It marks which
+Project is Active and shows a live indicator on any Project holding a running
+Session, and is where Projects are opened and switched. It is chrome around the
+Active Project, not a dashboard itself.
+_Avoid_: sidebar, project list, nav
 
 **Session**:
 A single Claude conversation driven through the Claude Agent SDK, usually with
@@ -66,8 +82,10 @@ lives in Sofa, not in the Worker.
 _Avoid_: work loop, autopilot
 
 **Field Notes**:
-A plain-text note David drags into Sofa while testing a Project, listing
-changes he wants made. Unstructured raw input that *feeds* the pipeline,
+A plain-text note David captures in Sofa while testing a Project — by dragging
+in a `.txt` or typing Items directly into the tool — listing changes he wants
+made. The capture mechanism (drag or type) is incidental; what matters is that
+it is unstructured raw input that *feeds* the pipeline,
 upstream of the Grilling Session — the entry ramp to the workflow. Sofa
 persists the parsed note and David's progress through it as operational state,
 so he can act on one Item, leave, and return to the next. It is never tracked
@@ -75,9 +93,30 @@ work and never lives in GitHub (cf. ADR 0002).
 _Avoid_: backlog, todo list, spec, PRD
 
 **Field Note Item**:
-A single actionable change parsed out of Field Notes. David acts on one Item
+A single actionable change in Field Notes — parsed from a dragged note or
+appended one-at-a-time by typing into the tool. David acts on one Item
 at a time, either escalating an unclear one into a Grilling Session or cutting
 a self-contained one directly into an Issue; the Item then carries an acted
 status and a link to whatever it spawned — the Grilling Session, or the Issue
 it became — so returning later shows what is left to do.
 _Avoid_: issue (an Item only becomes an Issue once cut), task
+
+**Process Notes**:
+An advisory, one-shot triage run over a Project's unacted Field Note Items. It
+classifies each Item and attaches a Recommendation, then ends — it files
+nothing, spawns no Grilling Session, and produces no tracked work. Its only
+output is annotations on Items, so David sees at a glance which existing per-Item
+action to take. It runs Claude on the host headlessly (no Session Terminal) and
+shares the single host-run slot with interactive Sessions: only one host agent
+runs at a time. Re-running re-classifies the currently-unacted Items.
+_Avoid_: triage (the skill/role, not this action), processing (vague), notes-to-issues (that skill files; Process Notes never does)
+
+**Recommendation**:
+The verdict Process Notes attaches to a Field Note Item: either **Grill** (the
+Item hides unresolved design and should be escalated to a Grilling Session) or
+**Cut** (the Item is self-contained and can be filed directly as an Issue), with
+a one-line rationale. It mirrors the Item's two existing actions rather than
+introducing a parallel vocabulary, and is purely advisory — David may take
+either action regardless, and acting on an Item supersedes its Recommendation.
+Defaults to Grill when the call is uncertain.
+_Avoid_: verdict, classification, label (overloaded with GitHub labels), refine/implement (say Grill/Cut)
