@@ -574,6 +574,20 @@ export function ProjectDashboard({
 
   const hasUnacted = !!notes?.items.some((i) => !i.acted);
   const processNotesLocked = hostBusy || processing;
+  // Recommendation split across currently-unacted Items — drives the summary
+  // line under the Field Notes header. Recomputed every render so a re-run or
+  // an Item being acted on (Grill / Create Issue / Remove) immediately
+  // restates the queue.
+  const recSplit = (notes?.items ?? []).reduce(
+    (acc, i) => {
+      if (i.acted) return acc;
+      if (i.recommendation === 'grill') acc.grill += 1;
+      else if (i.recommendation === 'issue') acc.issue += 1;
+      return acc;
+    },
+    { grill: 0, issue: 0 },
+  );
+  const hasRecSplit = recSplit.grill > 0 || recSplit.issue > 0;
 
   const total = usage?.total;
   const hasUsage = !!total && total.totalTokens > 0;
@@ -658,6 +672,11 @@ export function ProjectDashboard({
             </div>
           ) : (
             <div className="cz-fn">
+              {hasRecSplit && (
+                <div className="cz-fn-summary" aria-label="Recommendation summary">
+                  {recSplit.grill} to grill · {recSplit.issue} to cut
+                </div>
+              )}
               {notes.items.map((item) => {
                 // Acted Items collapse to a single dense one-liner — the tag,
                 // the Issue/Session link, the Item text (single-line, ellipsis
@@ -714,12 +733,17 @@ export function ProjectDashboard({
                     {item.text}
                   </div>
                   {item.recommendation && (
-                    <span
-                      className={`cz-fn-rec cz-fn-rec-${item.recommendation}`}
-                      aria-label={`Recommendation: ${item.recommendation === 'grill' ? 'Grill suggested' : 'Cut suggested'}`}
-                    >
-                      {item.recommendation === 'grill' ? 'Grill suggested' : 'Cut suggested'}
-                    </span>
+                    <div className="cz-fn-rec-row">
+                      <span
+                        className={`cz-fn-rec cz-fn-rec-${item.recommendation}`}
+                        aria-label={`Recommendation: ${item.recommendation === 'grill' ? 'Grill suggested' : 'Cut suggested'}`}
+                      >
+                        {item.recommendation === 'grill' ? 'Grill suggested' : 'Cut suggested'}
+                      </span>
+                      {item.rationale && (
+                        <span className="cz-fn-rationale">{item.rationale}</span>
+                      )}
+                    </div>
                   )}
                   {filing?.id === item.id ? (
                     // Create Issue confirm/edit step: pre-filled from the Item,
@@ -768,15 +792,16 @@ export function ProjectDashboard({
                       {onStartSession && (
                         <button
                           type="button"
-                          className="cz-disp"
+                          className={`cz-disp${item.recommendation === 'issue' ? ' cz-disp-weak' : ''}`}
                           onClick={() => void grillItem(item)}
+                          aria-label={item.recommendation === 'grill' ? 'Grill (recommended)' : 'Grill'}
                         >
                           Grill
                         </button>
                       )}
                       <button
                         type="button"
-                        className="cz-disp"
+                        className={`cz-disp${item.recommendation === 'grill' ? ' cz-disp-weak' : ''}`}
                         onClick={() =>
                           setFiling({
                             id: item.id,
@@ -784,6 +809,7 @@ export function ProjectDashboard({
                             body: item.text,
                           })
                         }
+                        aria-label={item.recommendation === 'issue' ? 'Create Issue (recommended)' : 'Create Issue'}
                       >
                         Create Issue
                       </button>
