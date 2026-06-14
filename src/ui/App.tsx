@@ -32,8 +32,15 @@ type SessionStatus = 'streaming' | 'awaiting' | 'done' | 'error';
 
 interface ActiveSession {
   id: number;
+  projectId: number;
   projectName: string;
   prompt: string;
+  /** The skill the Session was launched with (drives the BOOT line + meta). */
+  skill?: string;
+  /** The Project's configured Session model, if any (BOOT line metadata). */
+  model?: string;
+  /** Absolute working directory (the launching Project's dir) — BOOT cwd. */
+  dir?: string;
 }
 
 interface PastSession {
@@ -94,9 +101,12 @@ function SofaMark({ size = 32, stroke = '#2a1d0f' }: { size?: number; stroke?: s
 function QuestionForm({
   pending,
   onSubmit,
+  terminal = false,
 }: {
   pending: Extract<PendingInteraction, { kind: 'question' }>;
   onSubmit: (answer: string) => void;
+  /** Render as the Session Terminal's highlighted ASK block instead of a panel. */
+  terminal?: boolean;
 }) {
   const [choice, setChoice] = useState(pending.recommended ?? pending.options[0]?.label ?? OTHER);
   const [other, setOther] = useState('');
@@ -109,7 +119,12 @@ function QuestionForm({
   }
 
   return (
-    <form aria-label={`Question: ${pending.question}`} onSubmit={submit} className="cz-cush cz-form">
+    <form
+      aria-label={`Question: ${pending.question}`}
+      onSubmit={submit}
+      className={terminal ? 'cz-term-ask' : 'cz-cush cz-form'}
+    >
+      {terminal && <span className="ask-mark" aria-hidden="true">ASK</span>}
       <p className="q">{pending.question}</p>
       {pending.options.map((option) => (
         <label key={option.label}>
@@ -235,12 +250,217 @@ function PrdPanel({
   );
 }
 
+/** A terminal log line: a coloured tag + text, or a dim system note. */
+type TermTag = 'BOOT' | 'NOTE' | 'EDIT' | 'YOU' | 'DONE' | 'ERR';
+interface TermLine {
+  tag?: TermTag;
+  text: string;
+  /** Dim italic system line (resolutions: "Answered: …", "PRD published …"). */
+  sys?: boolean;
+}
+
+const TAG_CLASS: Record<TermTag, string> = {
+  BOOT: 't-boot',
+  NOTE: 't-note',
+  EDIT: 't-edit',
+  YOU: 't-you',
+  DONE: 't-done',
+  ERR: 't-err',
+};
+
 /**
- * One open Project's self-contained block: a Grilling Session hero (the front
- * door — type a seed, kick off a `grill-with-docs` Session), the secondary
- * generic dispatch bar (prompt + skill + Start Session) for non-grill Sessions,
- * and the dashboard grid (expanded by default, collapsible). Per-Project state
- * keeps dispatch unambiguous when several Projects are open.
+ * Map a transcript entry to a tagged terminal line. The interactive-Session SSE
+ * stream is unchanged (ADR 0008 Phase 1): `assistant_text` reads as NOTE, the
+ * `file_write` doc line as EDIT, `user_message` as YOU, and the synthetic
+ * resolutions ("Answered …") as dim system lines.
+ */
+function toTermLine(entry: TranscriptEntry): TermLine {
+  switch (entry.kind) {
+    case 'user':
+      return { tag: 'YOU', text: entry.text };
+    case 'error':
+      return { tag: 'ERR', text: entry.text };
+    case 'doc':
+      return { tag: 'EDIT', text: entry.text };
+    case 'resolution':
+      return { sys: true, text: entry.text };
+    default:
+      return { tag: 'NOTE', text: entry.text };
+  }
+}
+
+function TermLineRow({ line }: { line: TermLine }) {
+  if (line.sys) {
+    return (
+      <div className="cz-term-line sys">
+        <span className="tag" />
+        <span className="tx">{line.text}</span>
+      </div>
+    );
+  }
+  return (
+    <div className={`cz-term-line ${line.tag ? TAG_CLASS[line.tag] : ''}`}>
+      <span className="tag">{line.tag}</span>
+      <span className="tx">{line.text}</span>
+    </div>
+  );
+}
+
+interface LiveSession {
+  session: ActiveSession;
+  transcript: TranscriptEntry[];
+  pending: PendingInteraction[];
+  status: SessionStatus | null;
+  prdDraft: PrdDraft | null;
+  prdPublished: PrdPublication | null;
+  onAnswer: (questionId: string, answer: string) => void;
+  onDecide: (requestId: string, decision: 'allow' | 'deny') => void;
+  onSend: (text: string) => void;
+  onEnd: () => void;
+  onRevise: (text: string) => void;
+  onApprove: () => void;
+}
+
+/**
+ * The Session Terminal (ADR 0008): the inline surface that renders any live
+ * interactive Session as a real terminal — title bar, a streaming body of
+ * tagged log lines (with the structured `ASK` block for grilling questions),
+ * and a free-text reply row. Lines are driven entirely by the existing SSE
+ * stream; a synthetic BOOT line opens the transcript with the Session identity.
+ */
+function SessionTerminal({ live }: { live: LiveSession }) {
+  const { session, transcript, pending, status } = live;
+  const [input, setInput] = useState('');
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const streaming = status === 'streaming';
+
+  // Auto-scroll the body to the latest line as the stream advances.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [transcript.length, pending.length, status]);
+
+  // When the Session yields the turn, focus the reply row so a follow-up can be
+  // typed straight away.
+  useEffect(() => {
+    if (status === 'awaiting') inputRef.current?.focus();
+  }, [status]);
+
+  const statusText =
+    status === 'awaiting'
+      ? 'awaiting your reply'
+      : status === 'done'
+        ? 'done'
+        : status === 'error'
+          ? 'error'
+          : 'thinking…';
+
+  const bootMeta = [
+    `session #${session.id}`,
+    session.skill ? `skill ${session.skill}` : 'no skill',
+    session.model ? `model ${session.model}` : null,
+    session.dir ? `cwd ${session.dir}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text) return;
+    live.onSend(text);
+    setInput('');
+  }
+
+  return (
+    <div className="cz-term">
+      <div className="cz-term-bar">
+        <div className="lights" aria-hidden="true">
+          <span className="r" />
+          <span className="y" />
+          <span className="g" />
+        </div>
+        <span className="brand">
+          <SofaMark size={18} stroke="currentColor" /> sofa
+        </span>
+        <span className="meta mono">
+          session-{session.id}
+          {session.skill ? ` · ${session.skill}` : ''}
+        </span>
+        <span className={`live${streaming ? '' : ' still'}`}>
+          <span className="dot" />
+          {statusText}
+        </span>
+        <button type="button" className="cz-term-end" onClick={live.onEnd}>
+          End session ✕
+        </button>
+      </div>
+
+      <div className="cz-term-body" ref={bodyRef}>
+        <div className="cz-term-echo">
+          <span className="user">david@sofa</span>
+          {session.dir && <span className="path mono">{session.dir}</span>}
+          <span className="caret">▸</span>
+          <span className="cmd">
+            {session.skill ?? 'run'} <span className="arg">"{session.prompt}"</span>
+          </span>
+        </div>
+
+        <TermLineRow line={{ tag: 'BOOT', text: bootMeta }} />
+        {transcript.map((entry, i) => (
+          <TermLineRow key={i} line={toTermLine(entry)} />
+        ))}
+
+        {pending.map((interaction) =>
+          interaction.kind === 'question' ? (
+            <QuestionForm
+              key={interaction.questionId}
+              pending={interaction}
+              terminal
+              onSubmit={(answer) => live.onAnswer(interaction.questionId, answer)}
+            />
+          ) : (
+            <PermissionPrompt
+              key={interaction.requestId}
+              pending={interaction}
+              onDecide={(decision) => live.onDecide(interaction.requestId, decision)}
+            />
+          ),
+        )}
+
+        {status === 'done' && <TermLineRow line={{ tag: 'DONE', text: 'session complete' }} />}
+
+        {streaming && <span className="cz-term-cursor" aria-hidden="true" />}
+      </div>
+
+      <form className="cz-term-input" onSubmit={submit}>
+        <span className="user">david@sofa</span>
+        <span className="caret">▸</span>
+        <input
+          ref={inputRef}
+          aria-label="Reply"
+          value={input}
+          spellCheck={false}
+          disabled={streaming}
+          placeholder={streaming ? 'streaming…' : 'type your reply…'}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <span className="hint" aria-hidden="true">
+          ⏎ send
+        </span>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * One open Project's self-contained block. Idle, it shows the launch controls
+ * (Grilling hero + secondary skill dispatch bar) over the dashboard grid. When
+ * a Session is launched from it the card morphs in place (ADR 0008) into the
+ * live phase: the Session Terminal beside a fixed rail that keeps the dashboard
+ * (and Dispatch) interactive. Per-Project state keeps dispatch unambiguous when
+ * several Projects are open.
  */
 function ProjectCard({
   project,
@@ -248,6 +468,8 @@ function ProjectCard({
   prompt,
   skill,
   dashboardOpen,
+  liveSession,
+  receded,
   onPromptChange,
   onSkillChange,
   onToggleDashboard,
@@ -261,6 +483,10 @@ function ProjectCard({
   prompt: string;
   skill: string;
   dashboardOpen: boolean;
+  /** Set when a live Session belongs to this card — drives the morph to the live phase. */
+  liveSession: LiveSession | null;
+  /** Another card is hosting the live Session; recede this one but keep it visible. */
+  receded: boolean;
   onPromptChange: (value: string) => void;
   onSkillChange: (value: string) => void;
   onToggleDashboard: () => void;
@@ -285,7 +511,7 @@ function ProjectCard({
   }
 
   return (
-    <div className="cz-project">
+    <div className={`cz-project${receded ? ' receded' : ''}`}>
       <div className="cz-projhead">
         <div className="av">
           <SofaMark size={24} stroke="currentColor" />
@@ -294,17 +520,48 @@ function ProjectCard({
           <div className="nm">{project.name}</div>
           <div className="pa mono">{project.dir}</div>
         </div>
+        {liveSession && (
+          <div className="cz-livechip mono">
+            <span className="dot" aria-hidden="true" />
+            Session #{liveSession.session.id}
+          </div>
+        )}
         <div className="acts">
           <button type="button" className="cz-tab" onClick={onLoadSessions}>
             Past Sessions
           </button>
-          <button type="button" className="cz-tab" onClick={onToggleDashboard}>
-            {dashboardOpen ? 'Hide dashboard' : 'Show dashboard'}
-          </button>
+          {!liveSession && (
+            <button type="button" className="cz-tab" onClick={onToggleDashboard}>
+              {dashboardOpen ? 'Hide dashboard' : 'Show dashboard'}
+            </button>
+          )}
         </div>
       </div>
 
-      <form className="cz-cush cz-hero cz-accent" onSubmit={submitHero} aria-label="Start a Grilling Session">
+      {liveSession ? (
+        <div className="cz-live">
+          <div className="cz-term-col">
+            <SessionTerminal live={liveSession} />
+          </div>
+          <div className="cz-rail">
+            {liveSession.prdDraft && (
+              <PrdPanel
+                draft={liveSession.prdDraft}
+                published={liveSession.prdPublished}
+                onRevise={liveSession.onRevise}
+                onApprove={liveSession.onApprove}
+              />
+            )}
+            <ProjectDashboard
+              projectId={project.id}
+              onStartSession={onStartSession}
+              onViewSession={onViewSession}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          <form className="cz-cush cz-hero cz-accent" onSubmit={submitHero} aria-label="Start a Grilling Session">
         <label className="cz-hero-label" htmlFor={`hero-seed-${project.id}`}>
           What do you want to work on today?
         </label>
@@ -353,12 +610,14 @@ function ProjectCard({
         </button>
       </div>
 
-      {dashboardOpen && (
-        <ProjectDashboard
-          projectId={project.id}
-          onStartSession={onStartSession}
-          onViewSession={onViewSession}
-        />
+          {dashboardOpen && (
+            <ProjectDashboard
+              projectId={project.id}
+              onStartSession={onStartSession}
+              onViewSession={onViewSession}
+            />
+          )}
+        </>
       )}
     </div>
   );
@@ -525,32 +784,11 @@ export function App() {
   const [prdDraft, setPrdDraft] = useState<PrdDraft | null>(null);
   const [prdPublished, setPrdPublished] = useState<PrdPublication | null>(null);
   const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null);
-  const [composerText, setComposerText] = useState('');
   const sourceRef = useRef<EventSource | null>(null);
-  const sessionSectionRef = useRef<HTMLElement | null>(null);
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   // Dashboards are expanded by default; this tracks the ones the user collapsed.
   const [hiddenDashboards, setHiddenDashboards] = useState<Record<number, boolean>>({});
 
   const promptFor = (id: number) => prompts[id] ?? '';
-
-  // The Session transcript renders below the Project cards, so activating a
-  // Session (start, view, or resume) otherwise leaves the conversation below
-  // the fold. Pull it into view and focus its message input when one exists.
-  useEffect(() => {
-    if (session === null) return;
-    const section = sessionSectionRef.current;
-    if (section === null) return;
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    const input = section.querySelector<HTMLInputElement | HTMLTextAreaElement>(
-      'input:not([type="radio"]):not([type="checkbox"]), textarea',
-    );
-    input?.focus();
-  }, [session?.id]);
-
-  useEffect(() => {
-    if (status === 'awaiting') composerRef.current?.focus();
-  }, [status]);
 
   async function refresh() {
     const res = await fetch('/api/projects');
@@ -639,6 +877,29 @@ export function App() {
     }
   }
 
+  /** Collapse the live card back to its idle Composer, dropping all Session state. */
+  function collapseSession() {
+    sourceRef.current?.close();
+    setSession(null);
+    setTranscript([]);
+    setPending([]);
+    setStatus(null);
+    setPrdDraft(null);
+    setPrdPublished(null);
+  }
+
+  /**
+   * The Session Terminal's "End session" action: terminate a still-running
+   * Session via the end endpoint (ADR 0008), then collapse the card. A Session
+   * already done/errored (e.g. a viewed past transcript) just collapses.
+   */
+  async function endAndCollapse() {
+    if (session && (status === 'streaming' || status === 'awaiting')) {
+      await endSession(session.id);
+    }
+    collapseSession();
+  }
+
   async function approvePrd(sessionId: number) {
     setError(null);
     const res = await fetch(`/api/sessions/${sessionId}/prd/approve`, { method: 'POST' });
@@ -662,13 +923,29 @@ export function App() {
       throw new Error(msg);
     }
     const started = await res.json();
-    setSession({ id: started.id, projectName: project.name, prompt });
+    setSession({
+      id: started.id,
+      projectId: project.id,
+      projectName: project.name,
+      prompt,
+      skill,
+      dir: project.dir,
+    });
     setTranscript([]);
     setPending([]);
     setStatus('streaming');
     setPrdDraft(null);
     setPrdPublished(null);
     attachStream(started.id);
+    // Backfill the BOOT line's model from the Project's Session-model setting,
+    // without blocking the morph. Best-effort: a failure just omits the cell.
+    void fetch(`/api/projects/${project.id}/settings`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { sessionModel?: string | null } | null) => {
+        const model = data?.sessionModel ?? 'default';
+        setSession((prev) => (prev && prev.id === started.id ? { ...prev, model } : prev));
+      })
+      .catch(() => {});
     return started.id as number;
   }
 
@@ -691,10 +968,15 @@ export function App() {
       session: PastSession;
       events: TranscriptEvent[];
     };
-    const projectName =
-      projects.find((p) => p.id === projectId)?.name ?? `Project ${projectId}`;
+    const project = projects.find((p) => p.id === projectId);
     sourceRef.current?.close();
-    setSession({ id: persisted.id, projectName, prompt: persisted.prompt });
+    setSession({
+      id: persisted.id,
+      projectId,
+      projectName: project?.name ?? `Project ${projectId}`,
+      prompt: persisted.prompt,
+      dir: project?.dir,
+    });
     setTranscript(events.map(toEntry));
     setStatus(persisted.status === 'error' ? 'error' : 'done');
   }
@@ -786,7 +1068,13 @@ export function App() {
     }
     const { events } = (await res.json()) as { events: TranscriptEvent[] };
     sourceRef.current?.close();
-    setSession({ id: past.id, projectName, prompt: past.prompt });
+    setSession({
+      id: past.id,
+      projectId: past.projectId,
+      projectName,
+      prompt: past.prompt,
+      dir: projects.find((p) => p.id === past.projectId)?.dir,
+    });
     setTranscript(events.map(toEntry));
     setStatus(past.status === 'error' ? 'error' : 'done');
   }
@@ -807,7 +1095,13 @@ export function App() {
     }
     const transcriptRes = await fetch(`/api/sessions/${past.id}/transcript`);
     const { events } = (await transcriptRes.json()) as { events: TranscriptEvent[] };
-    setSession({ id: past.id, projectName, prompt });
+    setSession({
+      id: past.id,
+      projectId: past.projectId,
+      projectName,
+      prompt,
+      dir: projects.find((p) => p.id === past.projectId)?.dir,
+    });
     setTranscript(events.map(toEntry));
     setStatus('streaming');
     setPrompts((prev) => ({ ...prev, [past.projectId]: '' }));
@@ -815,7 +1109,7 @@ export function App() {
   }
 
   return (
-    <div className={`cz-app${prdDraft ? ' wide' : ''}`}>
+    <div className="cz-app">
       <header className="cz-top">
         <div className="cz-brand">
           <div className="cz-logo">
@@ -864,23 +1158,47 @@ export function App() {
       {projects.length === 0 ? (
         <p className="cz-muted">No Projects open yet.</p>
       ) : (
-        projects.map((p) => (
-          <ProjectCard
-            key={p.id}
-            project={p}
-            skills={skills}
-            prompt={promptFor(p.id)}
-            skill={skillByProject[p.id] ?? ''}
-            dashboardOpen={!hiddenDashboards[p.id]}
-            onPromptChange={(value) => setPrompts((prev) => ({ ...prev, [p.id]: value }))}
-            onSkillChange={(value) => setSkillByProject((prev) => ({ ...prev, [p.id]: value }))}
-            onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
-            onStart={() => void startSession(p)}
-            onLoadSessions={() => void loadSessions(p)}
-            onStartSession={(prompt, skill) => startSessionWith(p, prompt, skill)}
-            onViewSession={(sessionId) => void viewSessionById(p.id, sessionId)}
-          />
-        ))
+        projects.map((p) => {
+          const live: LiveSession | null =
+            session && session.projectId === p.id
+              ? {
+                  session,
+                  transcript,
+                  pending,
+                  status,
+                  prdDraft,
+                  prdPublished,
+                  onAnswer: (questionId, answer) => void answerQuestion(session.id, questionId, answer),
+                  onDecide: (requestId, decision) => void decidePermission(session.id, requestId, decision),
+                  onSend: (text) => {
+                    setStatus('streaming');
+                    void sendSessionMessage(session.id, text);
+                  },
+                  onEnd: () => void endAndCollapse(),
+                  onRevise: (text) => void revisePrd(session.id, text),
+                  onApprove: () => void approvePrd(session.id),
+                }
+              : null;
+          return (
+            <ProjectCard
+              key={p.id}
+              project={p}
+              skills={skills}
+              prompt={promptFor(p.id)}
+              skill={skillByProject[p.id] ?? ''}
+              dashboardOpen={!hiddenDashboards[p.id]}
+              liveSession={live}
+              receded={session !== null && session.projectId !== p.id}
+              onPromptChange={(value) => setPrompts((prev) => ({ ...prev, [p.id]: value }))}
+              onSkillChange={(value) => setSkillByProject((prev) => ({ ...prev, [p.id]: value }))}
+              onToggleDashboard={() => setHiddenDashboards((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+              onStart={() => void startSession(p)}
+              onLoadSessions={() => void loadSessions(p)}
+              onStartSession={(prompt, skill) => startSessionWith(p, prompt, skill)}
+              onViewSession={(sessionId) => void viewSessionById(p.id, sessionId)}
+            />
+          );
+        })
       )}
 
       {pastSessions && (
@@ -915,102 +1233,6 @@ export function App() {
               })}
             </ul>
           )}
-        </section>
-      )}
-
-      {session && (
-        <section ref={sessionSectionRef} aria-label="Session transcript" className="cz-section">
-          <h2>
-            Session #{session.id} — {session.projectName}{' '}
-            <span className="cz-muted">({status === 'streaming' ? 'thinking…' : status === 'awaiting' ? 'awaiting…' : status})</span>
-          </h2>
-          <p className="lede">{session.prompt}</p>
-          {(status === 'streaming' || status === 'awaiting') && (
-            <button
-              type="button"
-              className="cz-btn"
-              onClick={() => void endSession(session.id)}
-            >
-              End session
-            </button>
-          )}
-          <div className="cz-split">
-            <div className="main">
-              <div className="cz-cush cz-transcript">
-                {transcript.length === 0 && pending.length === 0 && status === 'streaming' ? (
-                  <p className="wait">Waiting for the Agent…</p>
-                ) : (
-                  transcript.map((entry, i) => (
-                    <p key={i} className={entry.kind}>
-                      {entry.kind === 'user' ? `You: ${entry.text}` : entry.text}
-                    </p>
-                  ))
-                )}
-              </div>
-              {pending.map((interaction) =>
-                interaction.kind === 'question' ? (
-                  <QuestionForm
-                    key={interaction.questionId}
-                    pending={interaction}
-                    onSubmit={(answer) => void answerQuestion(session.id, interaction.questionId, answer)}
-                  />
-                ) : (
-                  <PermissionPrompt
-                    key={interaction.requestId}
-                    pending={interaction}
-                    onDecide={(decision) => void decidePermission(session.id, interaction.requestId, decision)}
-                  />
-                ),
-              )}
-              {status === 'streaming' && pending.length === 0 && (
-                <p className="cz-thinking">thinking…</p>
-              )}
-              {status === 'awaiting' && pending.length === 0 && (
-                <form
-                  className="cz-composer"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const text = composerText.trim();
-                    if (!text) return;
-                    setStatus('streaming');
-                    void sendSessionMessage(session.id, text);
-                    setComposerText('');
-                  }}
-                >
-                  <textarea
-                    ref={composerRef}
-                    aria-label="Message"
-                    className="cz-field"
-                    rows={2}
-                    placeholder="Reply to the agent…"
-                    value={composerText}
-                    onChange={(e) => setComposerText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        const text = composerText.trim();
-                        if (!text) return;
-                        setStatus('streaming');
-                        void sendSessionMessage(session.id, text);
-                        setComposerText('');
-                      }
-                    }}
-                  />
-                  <button type="submit" className="cz-btn tan" disabled={!composerText.trim()}>
-                    Send
-                  </button>
-                </form>
-              )}
-            </div>
-            {prdDraft && (
-              <PrdPanel
-                draft={prdDraft}
-                published={prdPublished}
-                onRevise={(text) => void revisePrd(session.id, text)}
-                onApprove={() => void approvePrd(session.id)}
-              />
-            )}
-          </div>
         </section>
       )}
     </div>
