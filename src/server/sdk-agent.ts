@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentRunInput,
   AgentSession,
+  OneShotResult,
   PermissionDecision,
   QuestionOption,
 } from './agent.js';
@@ -284,5 +285,49 @@ export class SdkAgent implements Agent {
         abortController.abort();
       },
     };
+  }
+
+  /**
+   * One-shot, host-side run (ADR 0010): drive the SDK with the prompt and the
+   * named skill, collect every assistant text block until the run completes,
+   * and return the concatenated text. No `canUseTool` callback is wired in —
+   * the calling endpoint owns the slot and a single-shot triage has no need
+   * for question/permission round-trips.
+   */
+  async runOneShot({ prompt, cwd, skill, model }: AgentRunInput): Promise<OneShotResult> {
+    const messages = query({
+      prompt,
+      options: {
+        cwd,
+        maxTurns: this.options.maxTurns,
+        ...(this.options.bundledPluginDir
+          ? { plugins: [{ type: 'local' as const, path: this.options.bundledPluginDir }] }
+          : {}),
+        ...(skill ? { skills: skillEntries(skill) } : {}),
+        ...(model ? { model } : {}),
+      },
+    });
+    const chunks: string[] = [];
+    let usage: OneShotResult['usage'];
+    for await (const message of messages) {
+      if (message.type === 'assistant') {
+        for (const block of message.message.content) {
+          if (block.type === 'text' && block.text) chunks.push(block.text);
+        }
+      } else if (message.type === 'result') {
+        usage = {
+          inputTokens: message.usage.input_tokens ?? 0,
+          outputTokens: message.usage.output_tokens ?? 0,
+          cacheReadTokens: message.usage.cache_read_input_tokens ?? 0,
+          cacheCreationTokens: message.usage.cache_creation_input_tokens ?? 0,
+        };
+        if (message.subtype !== 'success') {
+          throw new Error(
+            `Agent run failed (${message.subtype})${message.errors.length ? `: ${message.errors.join('; ')}` : ''}`,
+          );
+        }
+      }
+    }
+    return usage ? { text: chunks.join(''), usage } : { text: chunks.join('') };
   }
 }

@@ -5,7 +5,7 @@ import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import type { Agent, AgentRunInput } from './agent.js';
-import { SessionRegistry } from './sessions.js';
+import { HostRunSlot, SessionRegistry } from './sessions.js';
 import { fsSkillSource, type SkillSource } from './skills.js';
 import { ActivityRegistry } from './activity.js';
 import { SessionStore } from './session-store.js';
@@ -98,6 +98,79 @@ export const PRD_LABEL = 'prd';
 
 const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
+/**
+ * Parses the `triage-field-notes` skill's strict output contract: one JSON
+ * object keyed by the input Item ids, each value `{recommendation, rationale}`
+ * with recommendation ∈ `'grill' | 'issue'`. The skill prompt instructs the
+ * model to emit "exactly one JSON object, and nothing else that competes to be
+ * the result", but real runs may wrap the object in prose; the first balanced
+ * `{...}` block is extracted before parsing. Returns `null` (zero verdicts
+ * written upstream) when:
+ *   - no JSON object is parseable,
+ *   - any expected id is missing or any extra id appears,
+ *   - any verdict has the wrong shape or a recommendation outside the enum.
+ */
+function parseTriageJson(
+  text: string,
+  expectedIds: number[],
+): Array<{ itemId: number; recommendation: 'grill' | 'issue'; rationale: string }> | null {
+  const block = extractFirstJsonObject(text);
+  if (block === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(block);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const obj = parsed as Record<string, unknown>;
+  const expected = new Set(expectedIds.map((n) => String(n)));
+  const seen = new Set<string>();
+  const verdicts: Array<{ itemId: number; recommendation: 'grill' | 'issue'; rationale: string }> = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (!expected.has(key)) return null;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    if (typeof value !== 'object' || value === null) return null;
+    const v = value as Record<string, unknown>;
+    if (v.recommendation !== 'grill' && v.recommendation !== 'issue') return null;
+    if (typeof v.rationale !== 'string') return null;
+    verdicts.push({
+      itemId: Number(key),
+      recommendation: v.recommendation,
+      rationale: v.rationale,
+    });
+  }
+  if (seen.size !== expected.size) return null;
+  return verdicts;
+}
+
+/** Finds the first balanced `{...}` substring in `text`, ignoring braces inside
+ * JSON strings. Returns null when no balanced object is found. */
+function extractFirstJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 export function createApp(
   db: DatabaseSync,
   agent: Agent,
@@ -114,6 +187,10 @@ export function createApp(
     return c.json({ error: err instanceof Error ? err.message : 'internal error' }, 500);
   });
   const sessions = new SessionRegistry();
+  // The single host-run slot shared by interactive Sessions and Process Notes
+  // (ADR 0010): the server-side mutual exclusion that guarantees never two
+  // host agents at once.
+  const hostSlot = new HostRunSlot();
   // Skills come from the user's real ~/.claude by default (one source of
   // truth shared with the CLI); tests inject a temp-dir source instead.
   const skillSource = skills ?? fsSkillSource(join(homedir(), '.claude'));
@@ -134,7 +211,10 @@ export function createApp(
     );
     sessions.start(sessionId, agentSession, {
       onEvent: (event) => store.appendEvent(sessionId, event),
-      onFinish: (errored) => store.setStatus(sessionId, errored ? 'error' : 'done'),
+      onFinish: (errored) => {
+        store.setStatus(sessionId, errored ? 'error' : 'done');
+        hostSlot.release('session');
+      },
       idleTimeoutMs: options?.sessionIdleTimeoutMs ?? DEFAULT_SESSION_IDLE_TIMEOUT_MS,
     });
   }
@@ -246,6 +326,12 @@ export function createApp(
       .prepare('SELECT session_model FROM open_projects WHERE id = ?')
       .get(projectId) as unknown as { session_model: string | null } | undefined;
     const sessionModel = modelRow?.session_model ?? null;
+
+    // The single host-run slot (ADR 0010): one host agent at a time. Refused
+    // when a Session or Process Notes run is already holding it.
+    if (!hostSlot.tryAcquire('session')) {
+      return c.json({ error: 'another host run is active for this Sofa instance' }, 409);
+    }
 
     const session = store.create(projectId, prompt, skill);
     runSession(projectId, session.id, {
@@ -404,6 +490,66 @@ export function createApp(
     }
   });
 
+  // Process Notes (ADR 0010): one-shot, host-side triage that classifies the
+  // Project's currently-unacted Items via the `triage-field-notes` skill and
+  // attaches a Recommendation (grill | issue) plus rationale to each. Acted
+  // Items are never classified; re-running overwrites verdicts on currently-
+  // unacted Items. Shares the global single host-run slot with interactive
+  // Sessions — refused while another host run is active, and holds the slot
+  // while running. On run failure or malformed JSON, no verdicts are written.
+  app.post('/api/projects/:projectId/process-notes', async (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const project = db
+      .prepare('SELECT id, dir, session_model FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as
+      | { id: number; dir: string; session_model: string | null }
+      | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+
+    if (!hostSlot.tryAcquire('process-notes')) {
+      return c.json({ error: 'another host run is active for this Sofa instance' }, 409);
+    }
+
+    try {
+      const unacted = fieldNotes.unactedForProject(projectId);
+      // Zero unacted Items is a no-op success — there is nothing to classify
+      // and no reason to spin up the Agent. The current Field Notes are
+      // returned so the UI can refresh against the same shape it gets on a
+      // real run.
+      if (unacted.length === 0) {
+        return c.json(fieldNotes.getForProject(projectId));
+      }
+
+      const promptItems = unacted.map((item) => ({ id: String(item.id), text: item.text }));
+      const result = await agent.runOneShot({
+        prompt: JSON.stringify(promptItems),
+        cwd: project.dir,
+        skill: 'triage-field-notes',
+        ...(project.session_model ? { model: project.session_model } : {}),
+      });
+
+      const verdicts = parseTriageJson(result.text, unacted.map((i) => i.id));
+      if (!verdicts) {
+        return c.json(
+          { error: 'the triage run returned no parseable verdict for the unacted Items' },
+          502,
+        );
+      }
+
+      fieldNotes.writeRecommendations(projectId, verdicts);
+      return c.json(fieldNotes.getForProject(projectId));
+    } catch (err) {
+      return c.json(
+        { error: `the triage run failed: ${err instanceof Error ? err.message : String(err)}` },
+        502,
+      );
+    } finally {
+      hostSlot.release('process-notes');
+    }
+  });
+
   // Remove a Field Note Item (acted or not): deletes its row so it no longer
   // appears. Mirrors DELETE /api/runs/:id — 204 on success, 404 when the Item
   // does not belong to this Project.
@@ -450,6 +596,9 @@ export function createApp(
     }
     if (!session.agentSessionId) {
       return c.json({ error: `Session ${sessionId} has no resume handle from the Agent` }, 409);
+    }
+    if (!hostSlot.tryAcquire('session')) {
+      return c.json({ error: 'another host run is active for this Sofa instance' }, 409);
     }
 
     const project = db

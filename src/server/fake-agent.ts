@@ -3,6 +3,7 @@ import type {
   AgentEvent,
   AgentRunInput,
   AgentSession,
+  OneShotResult,
   PermissionDecision,
 } from './agent.js';
 
@@ -13,6 +14,14 @@ export interface FakeAgentOptions {
   resumeScript?: AgentEvent[];
   /** If true, the initial run never completes — simulates an interrupted Session. */
   hang?: boolean;
+  /**
+   * Scripted one-shot result the fake returns from `runOneShot`. If a function,
+   * it is invoked with the run input — useful for tests that vary the text
+   * based on the prompt (e.g. Process Notes triage returns a different JSON
+   * payload per set of input Item ids). Throwing here surfaces as a rejected
+   * Promise, modelling an Agent failure.
+   */
+  oneShot?: OneShotResult | ((input: AgentRunInput) => OneShotResult | Promise<OneShotResult>);
 }
 
 /**
@@ -32,6 +41,8 @@ export type FakeAgentStep = AgentEvent | { type: 'await_message' };
  */
 export class FakeAgent implements Agent {
   readonly runs: AgentRunInput[] = [];
+  /** Inputs passed to runOneShot, for assertions on the dispatched prompt/skill/model. */
+  readonly oneShotRuns: AgentRunInput[] = [];
   /** Answers routed back into the running session, in arrival order. */
   readonly answers: Array<{ questionId: string; answer: string }> = [];
   /** Permission decisions routed back into the running session, in arrival order. */
@@ -53,6 +64,14 @@ export class FakeAgent implements Agent {
     private readonly script: FakeAgentStep[] = [{ type: 'assistant_text', text: 'Hello from the fake Agent.' }],
     private readonly options: FakeAgentOptions = {},
   ) {}
+
+  async runOneShot(input: AgentRunInput): Promise<OneShotResult> {
+    this.oneShotRuns.push(input);
+    const scripted = this.options.oneShot;
+    if (typeof scripted === 'function') return await scripted(input);
+    if (scripted) return scripted;
+    return { text: '' };
+  }
 
   run(input: AgentRunInput): AgentSession {
     this.runs.push(input);
