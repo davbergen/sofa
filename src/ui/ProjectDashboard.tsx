@@ -450,6 +450,20 @@ export function ProjectDashboard({
     if (res.ok) setNotes(await res.json());
   }
 
+  async function removeItem(itemId: number) {
+    setNotesError(null);
+    const res = await fetch(`/api/projects/${projectId}/field-notes/items/${itemId}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setNotesError((body as { error?: string } | null)?.error ?? `remove failed (${res.status})`);
+    } else {
+      setFiling((f) => (f?.id === itemId ? null : f));
+      await refreshNotes();
+    }
+  }
+
   // Grill an unclear Item: escalate it into a grill-with-docs Grilling Session
   // and link the Item to the spawned Session.
   async function grillItem(item: FieldNoteItem) {
@@ -561,6 +575,13 @@ export function ProjectDashboard({
                       {item.action !== 'issue' && item.sessionId && !onViewSession && (
                         <span className="cz-fn-sess-label">Session #{item.sessionId}</span>
                       )}
+                      <button
+                        type="button"
+                        className="cz-disp"
+                        onClick={() => void removeItem(item.id)}
+                      >
+                        Remove
+                      </button>
                     </div>
                   )}
                   {!item.acted && filing?.id === item.id ? (
@@ -596,6 +617,13 @@ export function ProjectDashboard({
                         >
                           Cancel
                         </button>
+                        <button
+                          type="button"
+                          className="cz-disp"
+                          onClick={() => void removeItem(item.id)}
+                        >
+                          Remove
+                        </button>
                       </div>
                     </div>
                   ) : (
@@ -622,6 +650,13 @@ export function ProjectDashboard({
                           }
                         >
                           Create Issue
+                        </button>
+                        <button
+                          type="button"
+                          className="cz-disp"
+                          onClick={() => void removeItem(item.id)}
+                        >
+                          Remove
                         </button>
                       </div>
                     )

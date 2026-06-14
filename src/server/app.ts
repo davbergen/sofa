@@ -384,6 +384,25 @@ export function createApp(
     }
   });
 
+  // Remove a Field Note Item (acted or not): deletes its row so it no longer
+  // appears. Mirrors DELETE /api/runs/:id — 204 on success, 404 when the Item
+  // does not belong to this Project.
+  app.delete('/api/projects/:projectId/field-notes/items/:itemId', (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const itemId = Number(c.req.param('itemId'));
+    const project = db
+      .prepare('SELECT id FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+    const deleted = fieldNotes.deleteItem(projectId, itemId);
+    if (!deleted) {
+      return c.json({ error: `no Field Note Item with id ${itemId} for Project ${projectId}` }, 404);
+    }
+    return c.body(null, 204);
+  });
+
   // The persisted transcript: survives restarts, unlike the live event stream.
   app.get('/api/sessions/:sessionId/transcript', (c) => {
     const sessionId = Number(c.req.param('sessionId'));
