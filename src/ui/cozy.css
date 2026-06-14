@@ -1769,6 +1769,55 @@ body {
   margin-top: 8px;
 }
 
+/* vim-style statusline: mode badge · skill · model badge · live elapsed */
+.cz-term-statusline {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: var(--term-titlebar);
+  border-top: 1px solid #2f251d;
+  font-size: 11.5px;
+  color: var(--tx3);
+}
+.cz-term-statusline .stl-mode {
+  display: inline-block;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10.5px;
+}
+.cz-term-statusline .stl-mode.mode-grill {
+  background: var(--ask-rail);
+  color: #2a1d0f;
+}
+.cz-term-statusline .stl-mode.mode-session {
+  background: var(--sage);
+  color: #1d2412;
+}
+.cz-term-statusline .stl-cell {
+  color: var(--tx);
+}
+.cz-term-statusline .stl-model {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #2a2018;
+  border: 1px solid #463729;
+  color: var(--cream);
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+}
+.cz-term-statusline .stl-spacer {
+  flex: 1;
+}
+.cz-term-statusline .stl-elapsed {
+  color: var(--tan);
+  font-variant-numeric: tabular-nums;
+}
+
 /* free-text reply row */
 .cz-term-input {
   flex: 0 0 auto;
