@@ -751,13 +751,23 @@ function ProjectCard({
                   </select>
                 </label>
               )}
-              <button type="submit" className="cz-btn tan" disabled={!trimmed}>
+              <button
+                type="submit"
+                className="cz-btn tan"
+                disabled={!trimmed || receded}
+                title={receded ? 'End the active Session first — one Session at a time.' : undefined}
+              >
                 {mode === 'grill' ? 'Start Grilling' : 'Start Session'}
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 3l14 9-14 9z" />
                 </svg>
               </button>
             </div>
+            {receded && (
+              <p className="cz-composer-lockhint" role="note">
+                One Session at a time — end the active Session to launch from this Project.
+              </p>
+            )}
           </form>
 
           {dashboardOpen && (

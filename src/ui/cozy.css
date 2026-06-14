@@ -1408,11 +1408,21 @@ body {
  * terminal-surface tokens (`--term-*`, `--tag-*`, `--ask-*`, traffic lights)
  * are defined once at the top of this file. */
 
-/* Other open cards stay on screen but recede while a Session is live. */
+/* Other open cards stay on screen but recede while a Session is live. The
+ * launch controls in the receded card's Composer are locked (ADR 0008: one
+ * interactive Session at a time); Dispatch on the dashboard grid below stays
+ * enabled so the Ralph Loop keeps running on every Project. */
 .cz-project.receded {
   opacity: 0.5;
   filter: saturate(0.75);
   transition: opacity 0.3s ease;
+}
+
+.cz-composer-lockhint {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--muted, #8a7a64);
+  font-style: italic;
 }
 
 /* live-phase header chip — "Session #n" with a pulsing sage dot */
