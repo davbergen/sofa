@@ -2222,3 +2222,134 @@ body {
   color: var(--tx4);
   font-size: 11px;
 }
+
+/* Terminal-styled idle launcher (#121) — the resting front door is restyled as
+   a terminal prompt: dark CRT surface, mono input, david@sofa caret, and the
+   merged-Composer Grill/Session toggle reads as terminal tabs. The Composer
+   mechanics underneath (radios, aria-labels, button text) are unchanged so the
+   live morph and Session launch keep working. */
+.cz-launcher {
+  background: var(--term-bg);
+  color: var(--cream);
+  font-family: 'JetBrains Mono', 'Spline Sans Mono', ui-monospace, monospace;
+  border: 1px solid var(--line);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35), inset 0 0 0 1px #1b140d;
+}
+.cz-launcher.cz-accent::before {
+  background: var(--tan);
+  opacity: 0.65;
+}
+.cz-launcher .cz-hero-label {
+  color: var(--cream);
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cz-launcher-caret {
+  color: var(--tan);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+.cz-launcher .cz-hero-input {
+  background: transparent;
+  border-bottom-color: #463729;
+  color: var(--cream);
+  caret-color: var(--tan);
+  font-size: 14.5px;
+}
+.cz-launcher .cz-hero-input::placeholder {
+  color: var(--tx4);
+}
+.cz-launcher .cz-hero-input:focus {
+  border-bottom-color: var(--tan);
+}
+.cz-launcher .cz-composer-toggle {
+  background: #2a2018;
+  border-color: #463729;
+}
+.cz-launcher .cz-composer-tab {
+  color: var(--tx4);
+  font-family: inherit;
+}
+.cz-launcher .cz-composer-tab.on {
+  background: var(--tan);
+  color: #2a1d0f;
+}
+.cz-launcher .cz-skill {
+  color: var(--tx);
+}
+.cz-launcher .cz-skill select {
+  background: #2a2018;
+  border: 1px solid #463729;
+  color: var(--cream);
+  font-family: inherit;
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.cz-launcher-open-term {
+  background: #2a2018;
+  border: 1px solid #463729;
+  color: var(--tx);
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+}
+.cz-launcher-open-term:hover {
+  color: var(--cream);
+  border-color: var(--seam);
+}
+.cz-launcher .cz-composer-lockhint {
+  color: var(--tx4);
+}
+
+/* Empty Session Terminal launcher (#121) — the full terminal layout in an
+   idle state. Body holds the BOOT line + mode toggle, statusline reads
+   "idle", and the live input row doubles as the launcher. Reuses the .cz-term
+   skeleton so the morph into a live Session is just a swap of contents. */
+.cz-term.idle .cz-term-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cz-term-launchopts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px;
+  flex-wrap: wrap;
+}
+.cz-term-launchopts .cz-composer-tab {
+  background: #2a2018;
+  border: 1px solid #463729;
+  color: var(--tx);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cz-term-launchopts .cz-composer-tab.on {
+  background: var(--tan);
+  color: #2a1d0f;
+  border-color: var(--tan);
+}
+.cz-term-launchopts .cz-skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tx3);
+}
+.cz-term-launchopts .cz-skill select {
+  background: #2a2018;
+  border: 1px solid #463729;
+  color: var(--cream);
+  font-family: inherit;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
