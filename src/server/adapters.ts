@@ -37,6 +37,13 @@ function exec(cmd: string, args: string[], cwd?: string): Promise<ExecResult> {
 /** The label that marks an Issue as ready for a Worker. */
 export const READY_LABEL = process.env.SOFA_READY_LABEL ?? 'ready-for-agent';
 
+/**
+ * Label that marks a GitHub issue as a PRD. PRDs aren't dispatchable, so they
+ * must never appear in Ready Issues even if mislabelled `ready-for-agent`.
+ * Mirrors PRD_LABEL in app.ts; duplicated here to avoid a server→app import.
+ */
+const PRD_LABEL = 'prd';
+
 export function ghGitHubAdapter(): GitHubAdapter {
   return {
     async resolveRepo(dir) {
@@ -50,13 +57,16 @@ export function ghGitHubAdapter(): GitHubAdapter {
     async listReadyIssues(dir) {
       const res = await exec(
         'gh',
-        ['issue', 'list', '--state', 'open', '--label', READY_LABEL, '--json', 'number,title,url'],
+        ['issue', 'list', '--state', 'open', '--label', READY_LABEL, '--json', 'number,title,url,labels'],
         dir,
       );
       if (res.code !== 0) {
         throw new Error(`gh issue list failed (exit ${res.code}): ${res.stderr.trim().slice(0, 300)}`);
       }
-      return JSON.parse(res.stdout) as ReadyIssue[];
+      const rows = JSON.parse(res.stdout) as Array<ReadyIssue & { labels: Array<{ name: string }> }>;
+      return rows
+        .filter((row) => !row.labels.some((l) => l.name === PRD_LABEL))
+        .map(({ number, title, url }) => ({ number, title, url }));
     },
 
     async createIssue(dir, issue) {
