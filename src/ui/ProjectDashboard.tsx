@@ -256,6 +256,10 @@ export function ProjectDashboard({
   const [killError, setKillError] = useState<string | null>(null);
   const [reconcileError, setReconcileError] = useState<string | null>(null);
   const [openPrByIssue, setOpenPrByIssue] = useState<Map<number, OpenPrForIssue>>(new Map());
+  // Worker Runs compaction (issue #118): terminal Runs collapse to a one-liner
+  // and only expand on click. Active Runs always render full and are not
+  // tracked here. Expanding is cheap, ephemeral UI state — never persisted.
+  const [expandedRuns, setExpandedRuns] = useState<Set<number>>(new Set());
   const [notes, setNotes] = useState<FieldNotes | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -801,16 +805,64 @@ export function ProjectDashboard({
           <div>
             {runs.map((run) => {
               const runUsage = usageByRun.get(run.id);
-              return (
-                <div className="cz-run" key={run.id}>
-                  <div className="row">
-                    <span className="id">#{run.issue}</span>
-                    <span className="nm">{run.issueTitle}</span>
-                    {ACTIVE.includes(run.state) ? (
-                      <button className="cz-kill" onClick={() => void killRun(run.id)}>
-                        Kill
+              const isActive = ACTIVE.includes(run.state);
+              // Terminal Runs default collapsed: a single dense one-liner with
+              // issue #, title, state dot, token count, and PR link. Clicking
+              // the row toggles the frozen stepper + failure/kill reason. Kill
+              // (active) / Remove (terminal) actions live on the row regardless
+              // of collapsed/expanded so the user never has to expand to act.
+              if (!isActive) {
+                const expanded = expandedRuns.has(run.id);
+                const dotTone =
+                  run.state === 'pr_merged'
+                    ? 'ok'
+                    : run.state === 'failed'
+                      ? 'err'
+                      : run.state === 'killed'
+                        ? 'killed'
+                        : 'active';
+                const stateLabel = run.state.replace('_', ' ');
+                const toggle = () =>
+                  setExpandedRuns((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(run.id)) next.delete(run.id);
+                    else next.add(run.id);
+                    return next;
+                  });
+                return (
+                  <div
+                    className={`cz-run cz-run-compact${expanded ? ' open' : ''}`}
+                    key={run.id}
+                  >
+                    <div className="cz-run-line">
+                      <button
+                        type="button"
+                        className="cz-run-toggle"
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? 'Collapse' : 'Expand'} run for issue #${run.issue}`}
+                        onClick={toggle}
+                      >
+                        <span className="id">#{run.issue}</span>
+                        <span className="nm">{run.issueTitle}</span>
+                        <span className={`cz-run-dot ${dotTone}`} aria-label={`state: ${stateLabel}`} />
+                        <span className="cz-run-state mono">{stateLabel}</span>
+                        {runUsage && (
+                          <span className="cz-run-toks mono">
+                            {formatTokens(runUsage.totalTokens)} tok
+                          </span>
+                        )}
                       </button>
-                    ) : (
+                      {run.prUrl && (
+                        <a
+                          className="cz-run-pr"
+                          href={run.prUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          PR →
+                        </a>
+                      )}
                       <button
                         className="cz-kill"
                         aria-label={`Remove run for issue #${run.issue}`}
@@ -818,20 +870,39 @@ export function ProjectDashboard({
                       >
                         Remove
                       </button>
+                    </div>
+                    {expanded && (
+                      <div className="cz-run-detail">
+                        <WorkerPhaseStepper run={run} />
+                        <div className="meta">
+                          <span className="mono">started {run.startedAt}</span>
+                          {run.state === 'failed' && run.failureReason && (
+                            <span className="reason err">{run.failureReason}</span>
+                          )}
+                          {run.state === 'killed' && run.failureReason && (
+                            <span className="reason killed">{run.failureReason}</span>
+                          )}
+                        </div>
+                      </div>
                     )}
+                  </div>
+                );
+              }
+              return (
+                <div className="cz-run" key={run.id}>
+                  <div className="row">
+                    <span className="id">#{run.issue}</span>
+                    <span className="nm">{run.issueTitle}</span>
+                    <button className="cz-kill" onClick={() => void killRun(run.id)}>
+                      Kill
+                    </button>
                   </div>
                   <WorkerPhaseStepper run={run} />
                   <div className="meta">
                     <span className="mono">started {run.startedAt}</span>
                     {runUsage && <span>{formatTokens(runUsage.totalTokens)} tokens</span>}
-                    {run.state === 'failed' && run.failureReason && (
-                      <span className="reason err">{run.failureReason}</span>
-                    )}
-                    {run.state === 'killed' && run.failureReason && (
-                      <span className="reason killed">{run.failureReason}</span>
-                    )}
                   </div>
-                  {ACTIVE.includes(run.state) && <WorkerActivityFeed runId={run.id} />}
+                  <WorkerActivityFeed runId={run.id} />
                 </div>
               );
             })}

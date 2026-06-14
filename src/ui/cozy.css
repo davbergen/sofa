@@ -1139,6 +1139,91 @@ body {
   background: rgba(207, 157, 140, 0.12);
 }
 
+/* ---- compact terminal run row (issue #118) ---------------------------- *
+ * Finished/failed/killed Runs collapse to a single dense one-liner so the
+ * history list stops pushing the dashboard down. Each row expands on click
+ * to reveal its frozen phase stepper + failure/kill reason.
+ */
+.cz-run-compact {
+  padding: 8px 12px;
+  margin-bottom: 6px;
+}
+.cz-run-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.cz-run-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cz-run-toggle:hover .nm {
+  color: var(--cream);
+}
+.cz-run-toggle .nm {
+  font-size: 13px;
+  color: var(--tx);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cz-run-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+.cz-run-dot.ok {
+  background: var(--sage);
+}
+.cz-run-dot.err {
+  background: var(--rose);
+}
+.cz-run-dot.killed {
+  background: var(--tx3);
+}
+.cz-run-dot.active {
+  background: var(--tan);
+}
+.cz-run-state {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--tx3);
+  flex: 0 0 auto;
+}
+.cz-run-toks {
+  font-size: 11px;
+  color: var(--tx3);
+  flex: 0 0 auto;
+}
+.cz-run-pr {
+  font-size: 11.5px;
+  color: var(--sage);
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+.cz-run-pr:hover {
+  color: var(--cream);
+}
+.cz-run-detail {
+  margin-top: 8px;
+}
+
 /* ---- worker phase stepper -------------------------------------------- *
  * Honest substitute for a 0–100% bar: four discrete segments (Clone → Work
  * → Push → PR) lit by lifecycle state + persisted phase. The active segment
