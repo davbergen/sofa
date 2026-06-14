@@ -373,6 +373,52 @@ describe('ending a Session', () => {
     const res = await endSession(app, 99999);
     expect(res.status).toBe(404);
   });
+
+  it('terminates a session that is awaiting a pending question', async () => {
+    const script: FakeAgentStep[] = [
+      {
+        type: 'question',
+        questionId: 'q1',
+        question: 'Which colour?',
+        options: [{ label: 'red' }, { label: 'blue' }],
+      },
+      // Never reached: End Session must bail out of the pending wait.
+      { type: 'assistant_text', text: 'never spoken' },
+    ];
+    const app = makeApp(new FakeAgent(script));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Ask me')).json();
+
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+    await sse.until('question');
+
+    const res = await endSession(app, session.id);
+    expect(res.status).toBe(200);
+
+    await sse.until('done');
+    const stored = await (await app.request(`/api/sessions/${session.id}/transcript`)).json();
+    expect(stored.session.status).toBe('done');
+  });
+
+  it('terminates a session that is awaiting a pending permission decision', async () => {
+    const script: FakeAgentStep[] = [
+      { type: 'permission_request', requestId: 'p1', toolName: 'Bash', input: { cmd: 'rm -rf /' } },
+      { type: 'assistant_text', text: 'never spoken' },
+    ];
+    const app = makeApp(new FakeAgent(script));
+    const project = await openProject(app, makeDir());
+    const session = await (await startSession(app, project.id, 'Try a tool')).json();
+
+    const sse = openSse(await app.request(`/api/sessions/${session.id}/events`));
+    await sse.until('permission_request');
+
+    const res = await endSession(app, session.id);
+    expect(res.status).toBe(200);
+
+    await sse.until('done');
+    const stored = await (await app.request(`/api/sessions/${session.id}/transcript`)).json();
+    expect(stored.session.status).toBe('done');
+  });
 });
 
 describe('idle-timeout', () => {

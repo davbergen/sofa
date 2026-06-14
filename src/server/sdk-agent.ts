@@ -106,7 +106,38 @@ export class SdkAgent implements Agent {
     const inputQueue = new MessageQueue();
     inputQueue.send(prompt);
 
-    const canUseTool: CanUseTool = async (toolName, input, { toolUseID }) => {
+    // Drives End Session: closing the input queue alone is not enough when the
+    // Agent is parked inside canUseTool awaiting an AskUserQuestion answer or
+    // a permission decision — the SDK never gets back to the input channel to
+    // observe its close. Aborting the query unblocks any in-flight tool
+    // callback and tears the SDK loop down.
+    const abortController = new AbortController();
+    let userClosed = false;
+
+    /**
+     * Race a callback Promise with the SDK's per-call abort signal so End
+     * Session can unblock the canUseTool callback cleanly. On abort the
+     * Promise rejects with AbortError; canUseTool re-throws and the SDK
+     * winds the query down.
+     */
+    const raceAbort = <T>(
+      register: (resolve: (value: T) => void) => void,
+      signal: AbortSignal,
+    ): Promise<T> =>
+      new Promise<T>((resolve, reject) => {
+        if (signal.aborted) {
+          reject(new DOMException('Session ended', 'AbortError'));
+          return;
+        }
+        const onAbort = () => reject(new DOMException('Session ended', 'AbortError'));
+        signal.addEventListener('abort', onAbort, { once: true });
+        register((value) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(value);
+        });
+      });
+
+    const canUseTool: CanUseTool = async (toolName, input, { toolUseID, signal }) => {
       if (toolName === 'AskUserQuestion') {
         const { questions } = input as unknown as AskUserQuestionInput;
         const answers: Record<string, string> = {};
@@ -117,8 +148,9 @@ export class SdkAgent implements Agent {
             description: o.description,
           }));
           out.push({ type: 'question', questionId, question: q.question, options });
-          answers[q.question] = await new Promise<string>((resolve) =>
-            pendingAnswers.set(questionId, resolve),
+          answers[q.question] = await raceAbort<string>(
+            (resolve) => pendingAnswers.set(questionId, resolve),
+            signal,
           );
         }
         return { behavior: 'allow', updatedInput: { ...input, answers } };
@@ -131,8 +163,9 @@ export class SdkAgent implements Agent {
       }
 
       out.push({ type: 'permission_request', requestId: toolUseID, toolName, input });
-      const decision = await new Promise<PermissionDecision>((resolve) =>
-        pendingDecisions.set(toolUseID, resolve),
+      const decision = await raceAbort<PermissionDecision>(
+        (resolve) => pendingDecisions.set(toolUseID, resolve),
+        signal,
       );
       return decision === 'allow'
         ? { behavior: 'allow', updatedInput: input }
@@ -145,6 +178,7 @@ export class SdkAgent implements Agent {
         cwd,
         maxTurns: this.options.maxTurns,
         canUseTool,
+        abortController,
         resume,
         // The SDK discovers skills from the same ~/.claude setup the CLI
         // uses (settingSources defaults to all sources); naming one here
@@ -189,6 +223,8 @@ export class SdkAgent implements Agent {
             });
             if (message.subtype === 'success') {
               out.push({ type: 'turn_boundary' });
+            } else if (userClosed && message.subtype.startsWith('aborted')) {
+              // End Session aborted the query mid-turn; not a failure.
             } else {
               out.push({
                 type: 'agent_error',
@@ -198,7 +234,12 @@ export class SdkAgent implements Agent {
           }
         }
       } catch (err) {
-        out.push({ type: 'agent_error', message: err instanceof Error ? err.message : String(err) });
+        // End Session aborts the query; the resulting AbortError is the
+        // expected exit path, not a failure to record on the transcript.
+        const isAbort = err instanceof Error && err.name === 'AbortError';
+        if (!(userClosed && isAbort)) {
+          out.push({ type: 'agent_error', message: err instanceof Error ? err.message : String(err) });
+        }
       } finally {
         out.finish();
       }
@@ -220,7 +261,12 @@ export class SdkAgent implements Agent {
         inputQueue.send(text);
       },
       close: () => {
+        if (userClosed) return;
+        userClosed = true;
         inputQueue.close();
+        // Aborts the SDK query and, via the signal threaded through canUseTool,
+        // unblocks any in-flight question or permission callback.
+        abortController.abort();
       },
     };
   }
