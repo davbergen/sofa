@@ -1,28 +1,26 @@
 import { test, expect } from '@playwright/test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-// Issue #104 — one interactive Session at a time across all open Projects.
-// With two Projects open and a Session live in the first, the second
-// Project's Composer launch button locks (with a hint), but its Dispatch
-// button (Workers / Ralph Loop) stays fully enabled. Ending the Session
-// re-enables the launch on the other card.
-const SESSION_ID = 9104;
+// Issue #117 — re-asserts the one-Session-at-a-time invariant under the Project
+// Rail / single Active Project shell (ADR 0009). With two Projects open and a
+// Session live in A, switching to B in the rail leaves A's Session running, B
+// shows its own idle workbench whose launcher is locked with the hint, but B's
+// Dispatch stays fully enabled. Switching back to A reattaches the live
+// terminal; ending the Session clears the lock and the rail pulse.
+const SESSION_ID = 9117;
 
-// ADR 0009 retires the stacked-cards layout: only the Active Project renders
-// at a time, so two Composers are never on screen simultaneously. The
-// preserved behaviours this spec covered (one Session at a time, Dispatch
-// stays enabled across switches) are re-asserted through rail-switching in
-// issue #117. Skip until then so the gate stays green.
-test.skip("One Session at a time: other open Projects' launch locks; Dispatch stays enabled", async ({
+test("Background Session survives a Project switch (rail model)", async ({
   page,
 }) => {
-  const dirA = mkdtempSync(join(tmpdir(), 'sofa-lockA-'));
-  const dirB = mkdtempSync(join(tmpdir(), 'sofa-lockB-'));
+  const dirA = mkdtempSync(join(tmpdir(), 'sofa-bg-A-'));
+  const dirB = mkdtempSync(join(tmpdir(), 'sofa-bg-B-'));
+  const nameA = basename(dirA);
+  const nameB = basename(dirB);
 
-  // One ready Issue for every Project so Dispatch buttons render and we can
-  // assert their enabled state on the receded card.
+  // One ready Issue per Project so Dispatch buttons render and we can assert
+  // their enabled state on the receded Project.
   await page.route(/\/api\/projects\/\d+\/issues$/, (route) =>
     route.fulfill({
       status: 200,
@@ -32,7 +30,6 @@ test.skip("One Session at a time: other open Projects' launch locks; Dispatch st
       ]),
     }),
   );
-  // Empty supporting data so the dashboard renders without errors.
   await page.route(/\/api\/projects\/\d+\/runs$/, (route) =>
     route.fulfill({
       status: 200,
@@ -50,9 +47,8 @@ test.skip("One Session at a time: other open Projects' launch locks; Dispatch st
     route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
   );
 
-  // Stub Session create + its event stream so no real agent runs. Hand back a
-  // never-closing empty body so the live phase stays observable for the
-  // assertions that follow.
+  // Stub Session create + a never-closing empty event stream so the live phase
+  // stays observable across switches.
   await page.route(/\/api\/projects\/\d+\/sessions$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     await route.fulfill({
@@ -70,51 +66,77 @@ test.skip("One Session at a time: other open Projects' launch locks; Dispatch st
 
   await page.goto('/');
 
-  // Open two Projects.
+  // Open A then B; B is most recently opened so the rail makes B Active.
   await page.getByLabel('Project directory').fill(dirA);
   await page.getByRole('button', { name: 'Open Project' }).click();
   await page.getByLabel('Project directory').fill(dirB);
   await page.getByRole('button', { name: 'Open Project' }).click();
 
-  // Sanity: both Composers' Start Grilling buttons exist and are disabled
-  // only because the prompt is empty.
-  const startButtons = page.getByRole('button', { name: 'Start Grilling' });
-  await expect(startButtons).toHaveCount(2);
+  const rail = page.getByRole('complementary', { name: 'Project Rail' });
+  const tabA = rail.getByRole('tab', { name: new RegExp(`^Project ${nameA}`) });
+  const tabB = rail.getByRole('tab', { name: new RegExp(`^Project ${nameB}`) });
 
-  // Fill the prompt on both Composers so the only thing that could disable
-  // the second button is the session lock.
-  const prompts = page.getByLabel('Grilling Session seed');
-  await prompts.nth(0).fill('first project work');
-  await prompts.nth(1).fill('second project work');
-  await expect(startButtons.nth(0)).toBeEnabled();
-  await expect(startButtons.nth(1)).toBeEnabled();
+  // Switch to A and launch a Session from A's Composer.
+  await tabA.click();
+  await expect(tabA).toHaveAttribute('aria-selected', 'true');
+  const composers = page.getByRole('form', {
+    name: 'Start a Grilling Session or Session',
+  });
+  await expect(composers).toHaveCount(1);
+  await page.getByLabel('Grilling Session seed').fill('first project work');
+  await page.getByRole('button', { name: 'Start Grilling' }).click();
 
-  // Launch a Session from the first Project.
-  await startButtons.nth(0).click();
-
-  // The first card morphs into the live phase — its Session #N chip shows.
+  // A's card morphs to the live phase — its Session #N chip is visible and the
+  // Composer is gone (replaced by the Session Terminal).
   await expect(page.getByText(`Session #${SESSION_ID}`)).toBeVisible();
+  await expect(composers).toHaveCount(0);
 
-  // The OTHER (still-idle) card's launch button is now locked with a hint,
-  // even though its prompt is filled. Only one Start Grilling button remains
-  // visible (the live card no longer renders one), and it is the receded
-  // card's locked button.
-  const lockedStart = page.getByRole('button', { name: 'Start Grilling' });
-  await expect(lockedStart).toHaveCount(1);
-  await expect(lockedStart).toBeDisabled();
+  // Rail shows a live pulse on A (the busy Project), not on B.
+  await expect(tabA.locator('.live-dot')).toBeVisible();
+  await expect(tabB.locator('.live-dot')).toHaveCount(0);
+
+  // Switch to B in the rail — A's Session is left running (background).
+  await tabB.click();
+  await expect(tabB).toHaveAttribute('aria-selected', 'true');
+
+  // B shows its own idle workbench: exactly one Composer is on screen, and it
+  // is B's. The live Session Terminal is not rendered for B.
+  await expect(composers).toHaveCount(1);
+  await expect(page.getByText(`Session #${SESSION_ID}`)).toHaveCount(0);
+
+  // B's launcher is locked with the one-Session hint, even with a filled prompt.
+  const startOnB = page.getByRole('button', { name: 'Start Grilling' });
+  await page.getByLabel('Grilling Session seed').fill('second project work');
+  await expect(startOnB).toBeDisabled();
   await expect(
     page.getByText(/One Session at a time — end the active Session/),
   ).toBeVisible();
 
-  // Dispatch on the receded card is independent of the Session lock — it
-  // stays enabled so the Ralph Loop keeps running while a grill is live.
-  const dispatchButtons = page.getByRole('button', { name: 'Dispatch' });
-  await expect(dispatchButtons.first()).toBeEnabled();
+  // B's Dispatch stays enabled — the Ralph Loop is independent of the
+  // single-Session lock.
+  const dispatchOnB = page.getByRole('button', { name: 'Dispatch' });
+  await expect(dispatchOnB.first()).toBeEnabled();
 
-  // End the live Session — the locked launch re-enables on the other card.
+  // The live pulse stays on A while B is Active.
+  await expect(tabA.locator('.live-dot')).toBeVisible();
+  await expect(tabB.locator('.live-dot')).toHaveCount(0);
+
+  // Switch back to A — the live Session Terminal reattaches in place.
+  await tabA.click();
+  await expect(tabA).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(`Session #${SESSION_ID}`)).toBeVisible();
+  await expect(composers).toHaveCount(0);
+
+  // End the Session from A — the lock and the rail pulse clear.
   await page.getByRole('button', { name: /End session/ }).click();
-  const reenabled = page.getByRole('button', { name: 'Start Grilling' });
-  await expect(reenabled).toHaveCount(2);
-  await expect(reenabled.nth(0)).toBeEnabled();
-  await expect(reenabled.nth(1)).toBeEnabled();
+  await expect(page.getByText(`Session #${SESSION_ID}`)).toHaveCount(0);
+  await expect(tabA.locator('.live-dot')).toHaveCount(0);
+  await expect(tabB.locator('.live-dot')).toHaveCount(0);
+
+  // Switching to B now finds its Composer unlocked.
+  await tabB.click();
+  await expect(page.getByRole('button', { name: 'Start Grilling' })).toBeEnabled();
+  await expect(
+    page.getByText(/One Session at a time — end the active Session/),
+  ).toHaveCount(0);
 });
