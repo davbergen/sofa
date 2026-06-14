@@ -399,6 +399,34 @@ body {
   border-bottom-color: var(--tan-d);
 }
 
+/* Merged Composer toggle — segmented Grill / Session row above the shared prompt. */
+.cz-composer-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 3px;
+}
+.cz-composer-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: var(--tx2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.cz-composer-tab.on {
+  background: var(--tan);
+  color: #2a1d0f;
+}
+
 /* dispatch bar */
 .cz-dispatch {
   padding: 18px 22px;
