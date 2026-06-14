@@ -595,6 +595,159 @@ function SessionRail({
 }
 
 /**
+ * The idle-terminal launcher (#121): the full terminal layout with no Session
+ * running. Empty body + idle BOOT line, statusline showing the chosen mode +
+ * "idle", and the live input row doubles as the launcher — Enter on the first
+ * line starts the Session in place via the same start-Session flow, with the
+ * dashboard one click away in the rail beside it.
+ */
+function IdleTerminal({
+  project,
+  mode,
+  skill,
+  skills,
+  prompt,
+  onModeChange,
+  onSkillChange,
+  onPromptChange,
+  onClose,
+  onLaunch,
+}: {
+  project: Project;
+  mode: 'grill' | 'session';
+  skill: string;
+  skills: Skill[];
+  prompt: string;
+  onModeChange: (mode: 'grill' | 'session') => void;
+  onSkillChange: (value: string) => void;
+  onPromptChange: (value: string) => void;
+  onClose: () => void;
+  onLaunch: (prompt: string, skill?: string) => Promise<number>;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const trimmed = prompt.trim();
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!trimmed) return;
+    const launchSkill = mode === 'grill' ? 'grill-with-docs' : skill || undefined;
+    try {
+      await onLaunch(trimmed, launchSkill);
+      onPromptChange('');
+    } catch {
+      // startSessionWith surfaces the error in the page-level banner; keep the
+      // line so the user can retry without retyping.
+    }
+  }
+
+  const bootText = `idle — ${mode === 'grill' ? 'Grill mode' : 'Session mode'} · type a prompt and press Enter to launch`;
+  const modeLabel = mode === 'grill' ? 'Grill' : 'Session';
+
+  return (
+    <div className="cz-term idle" aria-label="Idle terminal launcher">
+      <div className="cz-term-bar">
+        <div className="lights" aria-hidden="true">
+          <span className="r" />
+          <span className="y" />
+          <span className="g" />
+        </div>
+        <span className="brand">
+          <SofaMark size={18} stroke="currentColor" /> sofa
+        </span>
+        <span className="meta mono">launcher · {project.name}</span>
+        <span className="live still">
+          <span className="dot" aria-hidden="true" />
+          idle
+        </span>
+        <button type="button" className="cz-term-end" onClick={onClose}>
+          Close ✕
+        </button>
+      </div>
+
+      <div className="cz-term-body">
+        <TermLineRow line={{ tag: 'BOOT', text: bootText }} />
+        <div
+          className="cz-term-launchopts"
+          role="radiogroup"
+          aria-label="Composer mode"
+        >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'grill'}
+            className={`cz-composer-tab${mode === 'grill' ? ' on' : ''}`}
+            onClick={() => onModeChange('grill')}
+          >
+            <span aria-hidden="true">◐</span> Grill
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === 'session'}
+            className={`cz-composer-tab${mode === 'session' ? ' on' : ''}`}
+            onClick={() => onModeChange('session')}
+          >
+            <span aria-hidden="true">✲</span> Session
+          </button>
+          {mode === 'session' && (
+            <label className="cz-skill">
+              <span className="k">Skill</span>
+              <select
+                aria-label="Session skill"
+                value={skill}
+                onChange={(e) => onSkillChange(e.target.value)}
+              >
+                <option value="">(no skill)</option>
+                {skills.map((s) => (
+                  <option key={s.name} value={s.name} title={s.description}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="cz-term-statusline"
+        role="status"
+        aria-label="Launcher statusline"
+      >
+        <span className={`stl-mode mode-${mode}`}>{modeLabel}</span>
+        {mode === 'session' && skill && (
+          <span className="stl-cell stl-skill">{skill}</span>
+        )}
+        <span className="stl-spacer" />
+        <span className="stl-cell stl-elapsed mono">idle</span>
+      </div>
+
+      <form className="cz-term-input" onSubmit={submit}>
+        <span className="user">david@sofa</span>
+        <span className="caret">▸</span>
+        <input
+          ref={inputRef}
+          aria-label={mode === 'grill' ? 'Grilling Session seed' : 'Session prompt'}
+          value={prompt}
+          spellCheck={false}
+          placeholder={
+            mode === 'grill' ? 'e.g. The UI needs fixing' : 'e.g. tidy the README'
+          }
+          onChange={(e) => onPromptChange(e.target.value)}
+        />
+        <span className="hint" aria-hidden="true">
+          ⏎ launch
+        </span>
+      </form>
+    </div>
+  );
+}
+
+/**
  * One open Project's self-contained block. Idle, it shows the launch controls
  * (Grilling hero + secondary skill dispatch bar) over the dashboard grid. When
  * a Session is launched from it the card morphs in place (ADR 0008) into the
@@ -634,6 +787,14 @@ function ProjectCard({
   onViewSession: (sessionId: number) => void;
 }) {
   const [mode, setMode] = useState<'grill' | 'session'>('grill');
+  // The empty Session Terminal launcher (#121) — when open, replaces the idle
+  // Composer + dashboard grid with the full terminal layout in an idle state.
+  // It collapses back to the default dashboard-first view whenever a Session
+  // arrives or leaves, so the resting view per Project stays dashboard-first.
+  const [idleTerminalOpen, setIdleTerminalOpen] = useState(false);
+  useEffect(() => {
+    if (liveSession) setIdleTerminalOpen(false);
+  }, [liveSession]);
   const trimmed = prompt.trim();
 
   async function submitComposer(e: FormEvent) {
@@ -689,10 +850,34 @@ function ProjectCard({
             onViewSession={onViewSession}
           />
         </div>
+      ) : idleTerminalOpen ? (
+        <div className="cz-live">
+          <div className="cz-term-col">
+            <IdleTerminal
+              project={project}
+              mode={mode}
+              skill={skill}
+              skills={skills}
+              prompt={prompt}
+              onModeChange={setMode}
+              onSkillChange={onSkillChange}
+              onPromptChange={onPromptChange}
+              onClose={() => setIdleTerminalOpen(false)}
+              onLaunch={onStartSession}
+            />
+          </div>
+          <div className="cz-rail">
+            <ProjectDashboard
+              projectId={project.id}
+              onStartSession={onStartSession}
+              onViewSession={onViewSession}
+            />
+          </div>
+        </div>
       ) : (
         <>
           <form
-            className="cz-cush cz-hero cz-accent cz-composer"
+            className="cz-cush cz-hero cz-accent cz-composer cz-launcher"
             onSubmit={submitComposer}
             aria-label="Start a Grilling Session or Session"
           >
@@ -721,6 +906,9 @@ function ProjectCard({
               </button>
             </div>
             <label className="cz-hero-label" htmlFor={`composer-prompt-${project.id}`}>
+              <span className="cz-launcher-caret mono" aria-hidden="true">
+                david@sofa ▸
+              </span>{' '}
               {mode === 'grill'
                 ? 'What do you want to work on today?'
                 : 'What should the Session do?'}
@@ -729,7 +917,8 @@ function ProjectCard({
               <input
                 id={`composer-prompt-${project.id}`}
                 aria-label={mode === 'grill' ? 'Grilling Session seed' : 'Session prompt'}
-                className="cz-hero-input"
+                className="cz-hero-input mono"
+                spellCheck={false}
                 placeholder={mode === 'grill' ? 'e.g. The UI needs fixing' : 'e.g. tidy the README'}
                 value={prompt}
                 onChange={(e) => onPromptChange(e.target.value)}
@@ -761,6 +950,19 @@ function ProjectCard({
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 3l14 9-14 9z" />
                 </svg>
+              </button>
+              <button
+                type="button"
+                className="cz-btn cz-launcher-open-term"
+                disabled={receded}
+                onClick={() => setIdleTerminalOpen(true)}
+                title={
+                  receded
+                    ? 'End the active Session first — one Session at a time.'
+                    : 'Open an empty Session Terminal and launch from there.'
+                }
+              >
+                Open terminal ▸_
               </button>
             </div>
             {receded && (
