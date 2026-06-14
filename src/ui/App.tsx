@@ -1206,6 +1206,23 @@ export function App() {
     }
   }
 
+  async function closeProject(id: number) {
+    setError(null);
+    const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      setError(body?.error ?? `failed to close project (${res.status})`);
+      return;
+    }
+    const listRes = await fetch('/api/projects');
+    const list: Project[] = await listRes.json();
+    setProjects(list);
+    setActiveProjectId((current) => {
+      if (current !== id && list.some((p) => p.id === current)) return current;
+      return list[0]?.id ?? null;
+    });
+  }
+
   async function answerQuestion(sessionId: number, questionId: string, answer: string) {
     await fetch(`/api/sessions/${sessionId}/answer`, {
       method: 'POST',
@@ -1533,7 +1550,7 @@ export function App() {
                 const isActive = p.id === activeProjectId;
                 const isBusy = liveSessionProjectId === p.id;
                 return (
-                  <li key={p.id}>
+                  <li key={p.id} className="cz-rail-item-row">
                     <button
                       type="button"
                       role="tab"
@@ -1550,6 +1567,14 @@ export function App() {
                         <span className="pa mono">{p.dir}</span>
                       </span>
                       {isBusy && <span className="live-dot" aria-label="Live Session" />}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Close ${p.name}`}
+                      className="cz-rail-close"
+                      onClick={() => void closeProject(p.id)}
+                    >
+                      ×
                     </button>
                   </li>
                 );

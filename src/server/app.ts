@@ -292,6 +292,50 @@ export function createApp(
     return c.json(toProject(row), 201);
   });
 
+  app.delete('/api/projects/:id', (c) => {
+    const project = getProject(c.req.param('id'));
+    if (!project) {
+      return c.json({ error: 'no such Project' }, 404);
+    }
+
+    const activeRun = db
+      .prepare(
+        `SELECT id FROM worker_runs WHERE project_id = ? AND state IN (${ACTIVE_STATES.map(() => '?').join(', ')})`,
+      )
+      .get(project.id, ...ACTIVE_STATES) as unknown as { id: number } | undefined;
+    if (activeRun) {
+      return c.json({ error: 'a Worker run is active for this Project — kill it first' }, 409);
+    }
+
+    const runningSession = db
+      .prepare(`SELECT id FROM sessions WHERE project_id = ? AND status = 'running'`)
+      .get(project.id) as unknown as { id: number } | undefined;
+    if (runningSession) {
+      return c.json({ error: 'a Session is still running for this Project' }, 409);
+    }
+
+    db.exec('BEGIN');
+    try {
+      db.prepare('DELETE FROM token_usage WHERE project_id = ?').run(project.id);
+      db.prepare(
+        'DELETE FROM session_events WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)',
+      ).run(project.id);
+      db.prepare(
+        'DELETE FROM field_note_items WHERE note_id IN (SELECT id FROM field_notes WHERE project_id = ?)',
+      ).run(project.id);
+      db.prepare('DELETE FROM field_notes WHERE project_id = ?').run(project.id);
+      db.prepare('DELETE FROM sessions WHERE project_id = ?').run(project.id);
+      db.prepare('DELETE FROM worker_runs WHERE project_id = ?').run(project.id);
+      db.prepare('DELETE FROM open_projects WHERE id = ?').run(project.id);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+
+    return c.body(null, 204);
+  });
+
   // Skills discoverable from the user's ~/.claude setup, loadable into a Session.
   app.get('/api/skills', async (c) => {
     try {
