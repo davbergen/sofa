@@ -1,31 +1,65 @@
 /*
  * Cozy Workshop — the shared design-token stylesheet for the Sofa UI.
  *
- * A warm dark-espresso theme: upholstery-toned cushioned panels with stitched
- * dashed-seam borders, Hanken Grotesk + Spline Sans Mono. The palette lives in
- * CSS custom properties so every surface (home, transcript, PRD, sessions,
- * question/permission prompts) is themed from one place. See ADR-0003 for why
- * this is a stylesheet rather than inline styles: the seams (::before),
- * gradients, and :hover states cannot be expressed inline.
+ * A warm dark-espresso theme: upholstery-toned cushioned panels, Hanken Grotesk
+ * + Spline Sans Mono. The palette lives in CSS custom properties so every
+ * surface (home, transcript, PRD, sessions, question/permission prompts) is
+ * themed from one place. See ADR-0003 for why this is a stylesheet rather than
+ * inline styles: gradients, accent bars, and :hover states cannot be expressed
+ * inline.
+ *
+ * Re-toned to the "Inline Session Terminal" hi-fi handoff (darker palette): the
+ * signature stitched dashed-seam motif (`.cz-cush::before`) is retired in favour
+ * of solid 1px borders plus gradient accent bars. Terminal-surface tokens are
+ * defined here for the forthcoming Session Terminal slice (one token system, no
+ * forked theme — ADR-0003).
  */
 
 :root {
-  --bg: #211a16;
-  --bg2: #271f1a;
-  --cush: #30261f;
-  --cush2: #3a2e26;
-  --line: #473930;
-  --seam: #5c4a3d;
-  --cream: #f1e6d6;
-  --tx: #e3d6c4;
-  --tx2: #b3a290;
-  --tx3: #857463;
-  --tan: #cda878;
-  --tan-d: #a8814f;
-  --sage: #a3ad8c;
-  --sage-d: #7c8763;
-  --rose: #cf9d8c;
-  --rose-d: #a8786a;
+  /* ---- core palette (re-tuned to the darker hi-fi handoff) ------------- */
+  --page: #0f0b09; /* behind the app frame */
+  --bg: #191310; /* dashboard base (radial-gradient end) */
+  --bg2: #1f1813; /* inset rows, fields, segmented-control track */
+  --cush: #241b16; /* panel/card fill — gradient base */
+  --cush2: #2b211b; /* panel/card fill — gradient top */
+  --chip: #332720; /* icon chips, active segmented-control button */
+  --line: #3a2e25; /* default border */
+  --line-2: #473930; /* stronger border */
+  --seam: #54453a; /* remaining dashed affordances (drop zone, empty ring) */
+  --cream: #f0e7d8; /* headings, command text */
+  --tx: #ddd0bf; /* body text */
+  --tx2: #b3a18e; /* tertiary UI text */
+  --tx3: #897668; /* labels, meta */
+  --tx4: #5f5043; /* timestamps, faint meta */
+  --tan: #dba96c; /* primary amber accent, IDs, badges */
+  --tan-hi: #ecbe83; /* amber gradient highlight */
+  --tan-d: #b3854f; /* amber gradient base, accent-bar / active borders */
+  --sage: #a6b089; /* dispatch, live dots */
+  --sage-d: #7b8762; /* deep sage, david@sofa */
+  --rose: #cf9c8a; /* progress fill end */
+  --rose-d: #a8786a; /* kill-button border */
+
+  /* ---- terminal-surface tokens (consumed by the Session Terminal slice) */
+  --term-bg: #15100d; /* terminal frame */
+  --term-screen: #19120f; /* terminal body / input */
+  --term-titlebar: linear-gradient(#221913, #1c150f); /* terminal title bar */
+  --statusline-bg: #2a1f16; /* vim-style statusline background */
+  --statusline-fg: #1a130d; /* vim-style statusline foreground */
+  --ask-bg: rgba(227, 177, 120, 0.07); /* grill ASK-block highlight */
+  --ask-rail: #e3b178; /* ASK-block left border / ?n marker */
+  --traffic-red: #c4674e; /* terminal window control */
+  --traffic-yellow: #cda24e; /* terminal window control */
+  --traffic-green: #7b8762; /* terminal window control */
+
+  /* terminal log-line tag colours (tag → colour map) */
+  --tag-boot: #7b8762;
+  --tag-think: #8a7768;
+  --tag-read: #a8b487; /* READ / GREP / LIST */
+  --tag-exec: #e3b178;
+  --tag-write: #d49a86; /* EDIT / WRITE */
+  --tag-note: #f0e7d8;
+  --tag-done: #a8b487;
+  --tag-you: #dba96c;
 }
 
 * {
@@ -34,7 +68,8 @@
 
 body {
   margin: 0;
-  background: radial-gradient(140% 110% at 50% -20%, #2c2219 0%, var(--bg) 60%) fixed;
+  background: var(--page)
+    radial-gradient(135% 110% at 50% -15%, #221a15 0%, var(--bg) 58%) fixed;
   color: var(--tx);
   font-family: 'Hanken Grotesk', 'Segoe UI', system-ui, sans-serif;
 }
@@ -55,21 +90,34 @@ body {
   font-family: 'Spline Sans Mono', ui-monospace, monospace;
 }
 
-/* ---- stitched cushion panel ------------------------------------------- */
+/* ---- cushion panel ---------------------------------------------------- *
+ * The signature dashed-seam motif (formerly `.cz-cush::before`) is retired in
+ * favour of a solid 1px border; emphasised surfaces add a gradient accent bar
+ * via `.cz-accent` (see below). */
 .cz-cush {
   position: relative;
-  background: linear-gradient(165deg, var(--cush2), var(--cush));
+  background: linear-gradient(168deg, var(--cush2), var(--cush));
+  border: 1px solid var(--line);
   border-radius: 22px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 14px 34px rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 12px 30px rgba(0, 0, 0, 0.28);
 }
-.cz-cush::before {
+
+/* Gradient accent bar — the seam motif's emphatic replacement. A 4px amber bar
+   (highlight → deep) down the left edge, with the border re-toned to match.
+   Used on the composer/hero and any surface that should read as the focus. */
+.cz-accent {
+  border-color: var(--tan-d);
+}
+.cz-accent::before {
   content: '';
   position: absolute;
-  inset: 8px;
-  border: 1.5px dashed var(--seam);
-  border-radius: 15px;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 22px 0 0 22px;
+  background: linear-gradient(var(--tan-hi), var(--tan-d));
   pointer-events: none;
-  opacity: 0.6;
 }
 
 /* ---- brand header ----------------------------------------------------- */
@@ -90,19 +138,14 @@ body {
   height: 56px;
   flex: 0 0 auto;
   border-radius: 18px;
-  background: linear-gradient(160deg, var(--tan), var(--tan-d));
+  background: linear-gradient(160deg, #34281f, #2a201a);
+  border: 1px solid var(--line-2);
+  color: var(--tan);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
-  box-shadow: 0 8px 20px rgba(168, 129, 79, 0.3);
-}
-.cz-logo::after {
-  content: '';
-  position: absolute;
-  inset: 5px;
-  border: 1.5px dashed rgba(255, 255, 255, 0.35);
-  border-radius: 13px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34);
 }
 .cz-logo svg {
   width: 32px;
@@ -213,8 +256,8 @@ body {
 }
 .cz-h .d {
   flex: 1;
-  height: 1.5px;
-  border-top: 1.5px dashed var(--line);
+  height: 1px;
+  border-top: 1px solid var(--line);
 }
 .cz-h .c {
   font-size: 11px;
@@ -318,12 +361,11 @@ body {
 /* Grilling Session hero — the front door for each Project. Tan accent + larger
    type so it dominates over the secondary dispatch bar below. */
 .cz-hero {
-  padding: 20px 24px;
+  padding: 20px 24px 20px 28px;
   margin-bottom: 14px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  border-left: 4px solid var(--tan);
 }
 .cz-hero-label {
   font-size: 19px;
@@ -346,7 +388,7 @@ body {
   font-family: inherit;
   background: transparent;
   border: 0;
-  border-bottom: 1.5px dashed var(--line);
+  border-bottom: 1.5px solid var(--line);
   padding: 8px 2px;
 }
 .cz-hero-input::placeholder {
@@ -384,7 +426,7 @@ body {
   font-family: inherit;
   background: transparent;
   border: 0;
-  border-bottom: 1.5px dashed var(--line);
+  border-bottom: 1.5px solid var(--line);
   padding: 8px 2px;
 }
 .cz-prompt::placeholder {
@@ -1037,7 +1079,7 @@ body {
   cursor: pointer;
 }
 .cz-activity-toggle:hover {
-  color: var(--tx1);
+  color: var(--cream);
   border-color: var(--tx3);
 }
 
@@ -1047,7 +1089,7 @@ body {
   padding: 12px 13px;
   max-height: 12rem;
   overflow-y: auto;
-  background: #19130f;
+  background: var(--term-screen);
   border: 1.5px solid var(--line);
   border-radius: 12px;
   color: var(--tx2);
@@ -1121,7 +1163,7 @@ body {
   font-size: 12px;
   color: var(--tx2);
   padding: 5px 0;
-  border-top: 1px dashed var(--line);
+  border-top: 1px solid var(--line);
 }
 .cz-days .mono {
   color: var(--tx3);
@@ -1154,11 +1196,7 @@ body {
 }
 
 .cz-cush.cz-transcript {
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1.5px var(--line), 0 14px 34px rgba(0, 0, 0, 0.28);
-}
-.cz-cush.cz-transcript::before {
-  display: none;
+  background: var(--term-screen);
 }
 .cz-transcript {
   padding: 22px 24px;
@@ -1323,7 +1361,7 @@ body {
   color: var(--cream);
 }
 .cz-perm pre {
-  background: #19130f;
+  background: var(--term-screen);
   border: 1.5px solid var(--line);
   border-radius: 12px;
   padding: 12px 13px;
