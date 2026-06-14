@@ -11,7 +11,7 @@ import { ActivityRegistry } from './activity.js';
 import { SessionStore } from './session-store.js';
 import { FieldNotesStore } from './field-notes-store.js';
 import { parseFieldNotes } from './field-notes.js';
-import type { ContainerAdapter, GitHubAdapter, WorkerHandle } from './ports.js';
+import type { ContainerAdapter, GitHubAdapter, WorkerHandle, WorkerPhase } from './ports.js';
 import { READY_LABEL } from './adapters.js';
 import { ACTIVE_STATES, applyEvent, applyPrState, isActive, type RunState } from './runs.js';
 import { readSofaConfig, SofaConfigError } from './sofa-config.js';
@@ -46,6 +46,11 @@ export interface Run {
   state: RunState;
   prUrl: string | null;
   failureReason: string | null;
+  /**
+   * Furthest phase the Worker reached. Survives the terminal `failed`/`killed`
+   * event so the UI stepper knows which segment to paint as the death point.
+   */
+  phase: WorkerPhase | null;
   startedAt: string;
 }
 
@@ -57,6 +62,7 @@ interface RunRow {
   state: string;
   pr_url: string | null;
   failure_reason: string | null;
+  phase: string | null;
   started_at: string;
 }
 
@@ -69,6 +75,7 @@ function toRun(row: RunRow): Run {
     state: row.state as RunState,
     prUrl: row.pr_url,
     failureReason: row.failure_reason,
+    phase: row.phase as WorkerPhase | null,
     startedAt: row.started_at,
   };
 }
@@ -84,7 +91,7 @@ export interface AppOptions {
 }
 
 const RUN_COLUMNS =
-  'id, project_id, issue_number, issue_title, state, pr_url, failure_reason, started_at';
+  'id, project_id, issue_number, issue_title, state, pr_url, failure_reason, phase, started_at';
 
 /** Label applied to every published PRD on the Project's GitHub issue tracker. */
 export const PRD_LABEL = 'prd';
@@ -782,19 +789,23 @@ export function createApp(
           break;
       }
       const row = db
-        .prepare('SELECT state FROM worker_runs WHERE id = ?')
-        .get(runId) as unknown as { state: RunState } | undefined;
+        .prepare('SELECT state, phase FROM worker_runs WHERE id = ?')
+        .get(runId) as unknown as { state: RunState; phase: WorkerPhase | null } | undefined;
       if (!row) {
         return;
       }
-      const update = applyEvent(row.state, event);
+      const update = applyEvent(row.state, event, row.phase);
       if (!update) {
         return;
       }
-      db.prepare('UPDATE worker_runs SET state = ?, pr_url = ?, failure_reason = ? WHERE id = ?').run(
+      const nextPhase = update.phase ?? row.phase;
+      db.prepare(
+        'UPDATE worker_runs SET state = ?, pr_url = ?, failure_reason = ?, phase = ? WHERE id = ?',
+      ).run(
         update.state,
         update.prUrl ?? null,
         update.failureReason ?? null,
+        nextPhase,
         runId,
       );
       // Quota meter: terminal events may carry the run's token usage. Stale

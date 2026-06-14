@@ -110,6 +110,9 @@ const MIGRATIONS: string[] = [
   // operational preference in the store, never written to any repo file.
   // NULL = Default (no override). Curated aliases only: opus, sonnet, haiku, fable.
   `ALTER TABLE open_projects ADD COLUMN session_model TEXT`,
+  // Furthest phase a run reached, retained through `failed`/`killed` so the UI
+  // stepper can show where a run died. NULL until the first phase event.
+  `ALTER TABLE worker_runs ADD COLUMN phase TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {
