@@ -148,7 +148,21 @@ export interface AgentSession {
   close(): void;
 }
 
+/** Result of a one-shot host run (e.g. Process Notes, ADR 0010): the final
+ * assistant text and the run's token usage if the Agent reported one. */
+export interface OneShotResult {
+  text: string;
+  usage?: TokenUsage;
+}
+
 export interface Agent {
   /** Starts one Session turn and returns a handle for streaming events and sending answers. */
   run(input: AgentRunInput): AgentSession;
+  /**
+   * Runs the Agent single-shot to completion and returns the final assistant
+   * text. No interactive surface — no questions, no permission prompts —
+   * because the calling endpoint owns the slot for the duration of the call.
+   * Used by Process Notes (ADR 0010).
+   */
+  runOneShot(input: AgentRunInput): Promise<OneShotResult>;
 }

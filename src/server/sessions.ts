@@ -1,6 +1,32 @@
 import type { AgentEvent, AgentSession, PrdDraftEvent } from './agent.js';
 
 /**
+ * The global single host-run slot (ADR 0010): exactly one interactive Session
+ * or one Process Notes run may occupy the host Agent at a time. In-memory
+ * because the slot is process-scoped — a server restart drops everything that
+ * was holding it. Crash-on-acquire prevents the slot from leaking when two
+ * callers race.
+ */
+export class HostRunSlot {
+  private holder: 'session' | 'process-notes' | null = null;
+
+  busy(): boolean {
+    return this.holder !== null;
+  }
+
+  /** Acquires the slot for `holder`. Returns false if the slot is already taken. */
+  tryAcquire(holder: 'session' | 'process-notes'): boolean {
+    if (this.holder !== null) return false;
+    this.holder = holder;
+    return true;
+  }
+
+  release(holder: 'session' | 'process-notes'): void {
+    if (this.holder === holder) this.holder = null;
+  }
+}
+
+/**
  * The live transcript of one running Session. Buffers every Agent event so
  * late subscribers replay the full transcript, then tail live events.
  */

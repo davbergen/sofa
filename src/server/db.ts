@@ -113,6 +113,11 @@ const MIGRATIONS: string[] = [
   // Furthest phase a run reached, retained through `failed`/`killed` so the UI
   // stepper can show where a run died. NULL until the first phase event.
   `ALTER TABLE worker_runs ADD COLUMN phase TEXT`,
+  // Process Notes Recommendation (ADR 0010): the advisory verdict the one-shot
+  // triage attaches to a Field Note Item, plus a one-line rationale. Both
+  // nullable — Items unclassified or already acted carry NULL.
+  `ALTER TABLE field_note_items ADD COLUMN recommendation TEXT;
+  ALTER TABLE field_note_items ADD COLUMN rationale TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {

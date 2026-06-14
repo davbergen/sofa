@@ -10,6 +10,9 @@ export interface FieldNoteItem {
   /** When filed directly as an Issue (action === 'issue'): the GitHub Issue it became. */
   issueNumber: number | null;
   issueUrl: string | null;
+  /** Process Notes verdict for this Item, if it has been classified. */
+  recommendation: 'grill' | 'issue' | null;
+  rationale: string | null;
 }
 
 export interface FieldNotes {
@@ -30,9 +33,12 @@ interface ItemRow {
   session_id: number | null;
   issue_number: number | null;
   issue_url: string | null;
+  recommendation: string | null;
+  rationale: string | null;
 }
 
-const ITEM_COLUMNS = 'id, text, acted, action, session_id, issue_number, issue_url';
+const ITEM_COLUMNS =
+  'id, text, acted, action, session_id, issue_number, issue_url, recommendation, rationale';
 
 function toItem(row: ItemRow): FieldNoteItem {
   return {
@@ -43,6 +49,8 @@ function toItem(row: ItemRow): FieldNoteItem {
     sessionId: row.session_id,
     issueNumber: row.issue_number,
     issueUrl: row.issue_url,
+    recommendation: row.recommendation as 'grill' | 'issue' | null,
+    rationale: row.rationale,
   };
 }
 
@@ -164,6 +172,54 @@ export class FieldNotesStore {
     if (!this.belongsToProject(projectId, itemId)) return false;
     this.db.prepare('DELETE FROM field_note_items WHERE id = ?').run(itemId);
     return true;
+  }
+
+  /**
+   * The Project's currently-unacted Items, the input to Process Notes (ADR
+   * 0010). Acted Items are excluded — the verdict only makes sense for an
+   * Item David has yet to act on.
+   */
+  unactedForProject(projectId: number): FieldNoteItem[] {
+    const note = this.db
+      .prepare('SELECT id FROM field_notes WHERE project_id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
+    if (!note) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT ${ITEM_COLUMNS} FROM field_note_items
+         WHERE note_id = ? AND acted = 0 ORDER BY position`,
+      )
+      .all(note.id) as unknown as ItemRow[];
+    return rows.map(toItem);
+  }
+
+  /**
+   * Writes Process Notes verdicts to a batch of Items in one transaction, only
+   * overwriting `recommendation`/`rationale` on Items that are still unacted
+   * (acting on an Item supersedes its Recommendation, per ADR 0010). Items
+   * referenced by id but not belonging to the Project, or already acted, are
+   * silently skipped — the caller already filtered to unacted Items, this is
+   * defence in depth.
+   */
+  writeRecommendations(
+    projectId: number,
+    verdicts: Array<{ itemId: number; recommendation: 'grill' | 'issue'; rationale: string }>,
+  ): void {
+    this.db.exec('BEGIN');
+    try {
+      const update = this.db.prepare(
+        `UPDATE field_note_items SET recommendation = ?, rationale = ?
+         WHERE id = ? AND acted = 0
+           AND note_id IN (SELECT id FROM field_notes WHERE project_id = ?)`,
+      );
+      for (const v of verdicts) {
+        update.run(v.recommendation, v.rationale, v.itemId, projectId);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   private belongsToProject(projectId: number, itemId: number): boolean {
