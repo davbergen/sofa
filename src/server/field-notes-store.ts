@@ -82,6 +82,41 @@ export class FieldNotesStore {
   }
 
   /**
+   * Appends one manually-typed Item to the Project's current note. Creates the
+   * note row on first append, so the inline add doubles as a "start a note from
+   * nothing" path — `hasNote` flips true on the returned payload. The new Item
+   * is inserted at the next position (max(position) + 1, 0 when empty) so it
+   * tails the existing list. Returns the full FieldNotes payload, same shape
+   * the other endpoints return.
+   */
+  appendItem(projectId: number, text: string): FieldNotes {
+    this.db.exec('BEGIN');
+    try {
+      let note = this.db
+        .prepare('SELECT id FROM field_notes WHERE project_id = ?')
+        .get(projectId) as unknown as { id: number } | undefined;
+      if (!note) {
+        const { lastInsertRowid } = this.db
+          .prepare('INSERT INTO field_notes (project_id) VALUES (?)')
+          .run(projectId);
+        note = { id: Number(lastInsertRowid) };
+      }
+      const max = this.db
+        .prepare('SELECT MAX(position) AS m FROM field_note_items WHERE note_id = ?')
+        .get(note.id) as unknown as { m: number | null };
+      const nextPos = (max?.m ?? -1) + 1;
+      this.db
+        .prepare('INSERT INTO field_note_items (note_id, position, text) VALUES (?, ?, ?)')
+        .run(note.id, nextPos, text);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+    return this.getForProject(projectId);
+  }
+
+  /**
    * Records that David acted on an Item. Verifies the Item belongs to the given
    * Project so callers need not do a separate ownership check. Returns the
    * updated Item, or null if no matching Item is found for that Project.

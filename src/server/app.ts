@@ -301,6 +301,26 @@ export function createApp(
     return c.json(fieldNotes.replaceForProject(projectId, parseFieldNotes(body.text)), 201);
   });
 
+  // Inline manual append: type a single Item and add it to the Project's note.
+  // If no note exists yet, creates it (hasNote flips true on the returned
+  // payload). A manually-appended Item is identical to a parsed one — same
+  // shape, same actions, same persistence.
+  app.post('/api/projects/:projectId/field-notes/items', async (c) => {
+    const projectId = Number(c.req.param('projectId'));
+    const project = db
+      .prepare('SELECT id FROM open_projects WHERE id = ?')
+      .get(projectId) as unknown as { id: number } | undefined;
+    if (!project) {
+      return c.json({ error: `no open Project with id ${projectId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const text = typeof body?.text === 'string' ? body.text.trim() : '';
+    if (!text) {
+      return c.json({ error: 'text is required' }, 400);
+    }
+    return c.json(fieldNotes.appendItem(projectId, text), 201);
+  });
+
   // Mark a Field Note Item acted by the Grill action: record the action and the
   // Session id it spawned. The Item must belong to the given Project. (Cutting
   // an Item into an Issue is the separate atomic endpoint below.)
