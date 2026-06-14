@@ -29,13 +29,18 @@ _Avoid_: interview, planning session
 
 **PRD**:
 The document produced from a Grilling Session, describing a feature to be
-built. Published to the Project's GitHub issue tracker.
+built. Published to the Project's GitHub issue tracker. Although it is filed
+there, a PRD is not an Issue: it occupies a GitHub issue carrying the `prd`
+label and never the `ready-for-agent` label, so it is never dispatchable to a
+Worker.
 _Avoid_: spec, plan
 
 **Issue**:
 A unit of implementable work, derived from a PRD or cut directly from a
 self-contained Field Note Item. Lives on GitHub — GitHub is the source of truth
-for all tracked work.
+for all tracked work. Both PRDs and Issues physically live as GitHub issues;
+the label is the boundary — an Issue carries `ready-for-agent`, a PRD carries
+`prd`. A PRD is never an Issue.
 _Avoid_: ticket, task
 
 **Worker**:
