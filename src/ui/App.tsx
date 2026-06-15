@@ -28,6 +28,16 @@ interface PrdPublication {
   url: string;
 }
 
+interface FileIssueDraft {
+  title: string;
+  body: string;
+}
+
+interface FileIssueFiling {
+  number: number;
+  url: string;
+}
+
 type SessionStatus = 'streaming' | 'awaiting' | 'done' | 'error';
 
 interface ActiveSession {
@@ -252,6 +262,102 @@ function PrdPanel({
   );
 }
 
+/**
+ * Inline draft card for a Sofa-applied `ready-for-agent` Issue (ADR-0011).
+ * Mirrors the PRD draft card: shows the agent's proposed title + body, lets
+ * David optionally edit them, and files via `POST /api/sessions/:id/file-issue`
+ * which is the only place the label gets attached. Filed state collapses the
+ * card to a linked chip.
+ */
+function FileIssuePanel({
+  draft,
+  filed,
+  error,
+  onFile,
+  onDiscard,
+}: {
+  draft: FileIssueDraft;
+  filed: FileIssueFiling | null;
+  error: string | null;
+  onFile: (title: string, body: string) => void;
+  onDiscard: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(draft.title);
+  const [body, setBody] = useState(draft.body);
+
+  // If the draft is replaced (e.g. agent re-emits), refresh the edit buffers.
+  useEffect(() => {
+    setTitle(draft.title);
+    setBody(draft.body);
+    setEditing(false);
+  }, [draft.title, draft.body]);
+
+  if (filed) {
+    return (
+      <aside aria-label={`Filed issue #${filed.number}`} className="cz-cush cz-issue">
+        <h3>Issue filed</h3>
+        <p className="pub">
+          Filed as issue #{filed.number}:{' '}
+          <a href={filed.url} target="_blank" rel="noreferrer">
+            {filed.url}
+          </a>
+        </p>
+      </aside>
+    );
+  }
+
+  return (
+    <aside aria-label={`Issue draft: ${draft.title}`} className="cz-cush cz-issue">
+      {editing ? (
+        <>
+          <input
+            aria-label="Issue title"
+            className="cz-input cz-issue-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <textarea
+            aria-label="Issue body"
+            className="cz-input cz-issue-body"
+            value={body}
+            rows={14}
+            onChange={(e) => setBody(e.target.value)}
+          />
+        </>
+      ) : (
+        <>
+          <h3>{title}</h3>
+          <div className="doc">{body}</div>
+        </>
+      )}
+      {error && <p className="cz-issue-err" role="alert">{error}</p>}
+      <div className="cz-actions">
+        {editing ? (
+          <button type="button" className="cz-btn" onClick={() => setEditing(false)}>
+            Done editing
+          </button>
+        ) : (
+          <button type="button" className="cz-btn" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        )}
+        <button type="button" className="cz-btn" onClick={onDiscard}>
+          Discard
+        </button>
+        <button
+          type="button"
+          className="cz-btn tan"
+          disabled={!title.trim()}
+          onClick={() => onFile(title.trim(), body)}
+        >
+          File Issue
+        </button>
+      </div>
+    </aside>
+  );
+}
+
 /** A terminal log line: a coloured tag + text, or a dim system note. */
 type TermTag = 'BOOT' | 'NOTE' | 'EDIT' | 'YOU' | 'DONE' | 'ERR';
 interface TermLine {
@@ -364,12 +470,17 @@ interface LiveSession {
   status: SessionStatus | null;
   prdDraft: PrdDraft | null;
   prdPublished: PrdPublication | null;
+  fileIssueDraft: FileIssueDraft | null;
+  fileIssueFiled: FileIssueFiling | null;
+  fileIssueError: string | null;
   onAnswer: (questionId: string, answer: string) => void;
   onDecide: (requestId: string, decision: 'allow' | 'deny') => void;
   onSend: (text: string) => void;
   onEnd: () => void;
   onRevise: (text: string) => void;
   onApprove: () => void;
+  onFileIssue: (title: string, body: string) => void;
+  onDiscardFileIssue: () => void;
 }
 
 /**
@@ -524,16 +635,18 @@ function SessionRail({
   onStartSession: (prompt: string, skill?: string) => Promise<number>;
   onViewSession: (sessionId: number) => void;
 }) {
-  const hasDraft = live.prdDraft !== null;
-  const [tab, setTab] = useState<'dashboard' | 'prd'>('dashboard');
+  const hasPrd = live.prdDraft !== null;
+  const hasIssue = live.fileIssueDraft !== null;
+  const hasDraft = hasPrd || hasIssue;
+  const [tab, setTab] = useState<'dashboard' | 'prd' | 'issue'>('dashboard');
 
-  // When a draft first arrives (or is replaced after revision), auto-focus the
-  // PRD tab so the draft surfaces. A draft going away (collapse/end) restores
-  // Dashboard as the default.
+  // When a draft first arrives (or is replaced after revision), auto-focus its
+  // tab so it surfaces. A draft going away restores Dashboard as the default.
   useEffect(() => {
-    if (hasDraft) setTab('prd');
+    if (hasIssue) setTab('issue');
+    else if (hasPrd) setTab('prd');
     else setTab('dashboard');
-  }, [hasDraft]);
+  }, [hasPrd, hasIssue]);
 
   return (
     <div className="cz-rail">
@@ -550,17 +663,32 @@ function SessionRail({
           >
             Dashboard
           </button>
-          <button
-            type="button"
-            role="tab"
-            id="cz-rail-tab-prd"
-            aria-selected={tab === 'prd'}
-            aria-controls="cz-rail-panel-prd"
-            className={`cz-rail-tab${tab === 'prd' ? ' on' : ''}`}
-            onClick={() => setTab('prd')}
-          >
-            PRD
-          </button>
+          {hasPrd && (
+            <button
+              type="button"
+              role="tab"
+              id="cz-rail-tab-prd"
+              aria-selected={tab === 'prd'}
+              aria-controls="cz-rail-panel-prd"
+              className={`cz-rail-tab${tab === 'prd' ? ' on' : ''}`}
+              onClick={() => setTab('prd')}
+            >
+              PRD
+            </button>
+          )}
+          {hasIssue && (
+            <button
+              type="button"
+              role="tab"
+              id="cz-rail-tab-issue"
+              aria-selected={tab === 'issue'}
+              aria-controls="cz-rail-panel-issue"
+              className={`cz-rail-tab${tab === 'issue' ? ' on' : ''}`}
+              onClick={() => setTab('issue')}
+            >
+              Issue
+            </button>
+          )}
         </div>
       )}
       {(!hasDraft || tab === 'dashboard') && (
@@ -588,6 +716,21 @@ function SessionRail({
             published={live.prdPublished}
             onRevise={live.onRevise}
             onApprove={live.onApprove}
+          />
+        </div>
+      )}
+      {hasDraft && tab === 'issue' && live.fileIssueDraft && (
+        <div
+          role="tabpanel"
+          id="cz-rail-panel-issue"
+          aria-labelledby="cz-rail-tab-issue"
+        >
+          <FileIssuePanel
+            draft={live.fileIssueDraft}
+            filed={live.fileIssueFiled}
+            error={live.fileIssueError}
+            onFile={live.onFileIssue}
+            onDiscard={live.onDiscardFileIssue}
           />
         </div>
       )}
@@ -1152,6 +1295,9 @@ export function App() {
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [prdDraft, setPrdDraft] = useState<PrdDraft | null>(null);
   const [prdPublished, setPrdPublished] = useState<PrdPublication | null>(null);
+  const [fileIssueDraft, setFileIssueDraft] = useState<FileIssueDraft | null>(null);
+  const [fileIssueFiled, setFileIssueFiled] = useState<FileIssueFiling | null>(null);
+  const [fileIssueError, setFileIssueError] = useState<string | null>(null);
   const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   // Dashboards are expanded by default; this tracks the ones the user collapsed.
@@ -1287,6 +1433,9 @@ export function App() {
     setStatus(null);
     setPrdDraft(null);
     setPrdPublished(null);
+    setFileIssueDraft(null);
+    setFileIssueFiled(null);
+    setFileIssueError(null);
   }
 
   /**
@@ -1299,6 +1448,29 @@ export function App() {
       await endSession(session.id);
     }
     collapseSession();
+  }
+
+  async function fileIssue(sessionId: number, title: string, body: string) {
+    setFileIssueError(null);
+    const res = await fetch(`/api/sessions/${sessionId}/file-issue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      setFileIssueError(data?.error ?? `filing the Issue failed (${res.status})`);
+      return;
+    }
+    const { number, url } = (await res.json()) as { number: number; url: string };
+    setFileIssueFiled({ number, url });
+    setTranscript((t) => [...t, { kind: 'resolution', text: `Issue filed as #${number}.` }]);
+  }
+
+  function discardFileIssue() {
+    setFileIssueDraft(null);
+    setFileIssueFiled(null);
+    setFileIssueError(null);
   }
 
   async function approvePrd(sessionId: number) {
@@ -1338,6 +1510,9 @@ export function App() {
     setStatus('streaming');
     setPrdDraft(null);
     setPrdPublished(null);
+    setFileIssueDraft(null);
+    setFileIssueFiled(null);
+    setFileIssueError(null);
     attachStream(started.id);
     // Backfill the BOOT line's model from the Project's Session-model setting,
     // without blocking the morph. Best-effort: a failure just omits the cell.
@@ -1433,6 +1608,12 @@ export function App() {
       setPrdPublished({ issueNumber, url });
       setTranscript((t) => [...t, { kind: 'resolution', text: `PRD published as issue #${issueNumber}.` }]);
     });
+    source.addEventListener('file_issue_draft', (e) => {
+      const { title, body } = JSON.parse((e as MessageEvent).data);
+      setFileIssueDraft({ title, body });
+      setFileIssueFiled(null);
+      setFileIssueError(null);
+    });
     source.addEventListener('done', () => {
       setStatus('done');
       source.close();
@@ -1516,6 +1697,9 @@ export function App() {
           status,
           prdDraft,
           prdPublished,
+          fileIssueDraft,
+          fileIssueFiled,
+          fileIssueError,
           onAnswer: (questionId, answer) => void answerQuestion(session.id, questionId, answer),
           onDecide: (requestId, decision) => void decidePermission(session.id, requestId, decision),
           onSend: (text) => {
@@ -1525,6 +1709,8 @@ export function App() {
           onEnd: () => void endAndCollapse(),
           onRevise: (text) => void revisePrd(session.id, text),
           onApprove: () => void approvePrd(session.id),
+          onFileIssue: (title, body) => void fileIssue(session.id, title, body),
+          onDiscardFileIssue: () => discardFileIssue(),
         }
       : null;
 

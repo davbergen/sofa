@@ -1663,18 +1663,21 @@ body {
   color: var(--tx3);
 }
 
-/* PRD draft panel */
-.cz-prd {
+/* PRD draft panel — `.cz-issue` is the FileIssue draft sibling */
+.cz-prd,
+.cz-issue {
   flex: 1;
   min-width: 0;
   align-self: flex-start;
   padding: 20px 22px;
 }
-.cz-prd h3 {
+.cz-prd h3,
+.cz-issue h3 {
   margin: 0 0 14px;
   font-size: 16px;
   color: var(--cream);
 }
+.cz-issue .doc,
 .cz-prd .doc {
   background: var(--bg2);
   border: 1.5px solid var(--line);
@@ -1688,13 +1691,32 @@ body {
   max-height: 26rem;
   overflow-y: auto;
 }
-.cz-prd .pub {
+.cz-prd .pub,
+.cz-issue .pub {
   margin-top: 14px;
   font-size: 13px;
   color: var(--tx2);
 }
-.cz-prd .pub a {
+.cz-prd .pub a,
+.cz-issue .pub a {
   color: var(--sage);
+}
+.cz-issue-title {
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+.cz-issue-body {
+  width: 100%;
+  resize: vertical;
+  min-height: 14rem;
+  font-family: 'Spline Sans Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.cz-issue-err {
+  margin: 10px 0 0;
+  color: var(--rose);
+  font-size: 13px;
 }
 
 /* inline revise form */
