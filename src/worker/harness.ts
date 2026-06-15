@@ -371,6 +371,7 @@ export async function runWorker(
     'in a fresh clone of the repository. Implement exactly this one issue — nothing else —',
     'and commit your work with a clear message. Do not push and do not open a pull request;',
     'the harness does that. Run the project lint/test gates if present and make them pass.',
+    "Follow the repository's conventions in CLAUDE.md and match existing patterns and components; do not invent new UI or styling where an existing pattern exists.",
     '',
     `Issue title: ${issueTitle}`,
     '',
