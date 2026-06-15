@@ -195,6 +195,44 @@ body {
   box-shadow: 0 0 9px var(--sage);
   animation: cz-pulse 1.8s infinite;
 }
+/* Each open-Project row pairs the Project tab with a close cross pinned to the
+   box's top-right corner. The cross rests faint and steps up to the rose
+   kill-tone on hover/focus, matching the .cz-kill affordance elsewhere. */
+.cz-rail-item-row {
+  position: relative;
+}
+.cz-rail-item-row .cz-rail-item {
+  padding-right: 32px; /* keep the name clear of the corner cross */
+}
+.cz-rail-close {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 21px;
+  height: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1.5px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--tx4);
+  cursor: pointer;
+  font-family: inherit;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease,
+    border-color 0.12s ease;
+}
+.cz-rail-item-row:hover .cz-rail-close,
+.cz-rail-close:focus-visible {
+  opacity: 1;
+}
+.cz-rail-close:hover {
+  color: var(--rose);
+  background: rgba(207, 157, 140, 0.12);
+  border-color: var(--rose-d);
+}
 .cz-rail-open {
   display: flex;
   flex-direction: column;
