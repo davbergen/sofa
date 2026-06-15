@@ -18,8 +18,8 @@ import type {
 } from '../src/server/ports';
 
 const ISSUES: ReadyIssue[] = [
-  { number: 7, title: 'Add a thing', url: 'https://github.com/davbergen/scratch/issues/7' },
-  { number: 9, title: 'Fix the thing', url: 'https://github.com/davbergen/scratch/issues/9' },
+  { number: 7, title: 'Add a thing', url: 'https://github.com/davbergen/scratch/issues/7', blockedBy: [] },
+  { number: 9, title: 'Fix the thing', url: 'https://github.com/davbergen/scratch/issues/9', blockedBy: [] },
 ];
 
 function fakeGitHub(issues: ReadyIssue[] = ISSUES) {

@@ -21,6 +21,7 @@ interface ReadyIssue {
   number: number;
   title: string;
   url: string;
+  blockedBy: number[];
 }
 
 interface OpenPrForIssue {
@@ -918,18 +919,24 @@ export function ProjectDashboard({
               // out and replaced by a link to the live PR, so the Issue can't
               // be silently re-dispatched while review is in flight.
               const openPr = openPrByIssue.get(issue.number);
+              const isBlocked = issue.blockedBy.length > 0;
               return (
                 <div className="cz-issue" key={issue.number}>
                   <div className="row">
                     <a className="id" href={issue.url} target="_blank" rel="noreferrer">
                       #{issue.number}
                     </a>
+                    {isBlocked && (
+                      <span className="cz-blocked-chip">
+                        Blocked by {issue.blockedBy.map((n) => `#${n}`).join(', ')}
+                      </span>
+                    )}
                   </div>
                   <div className="txt">{issue.title}</div>
                   <button
                     className="cz-disp"
                     onClick={() => void dispatchIssue(issue)}
-                    disabled={anyActive || !!openPr}
+                    disabled={anyActive || !!openPr || isBlocked}
                   >
                     Dispatch
                     <ArrowIcon />

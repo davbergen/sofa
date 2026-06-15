@@ -9,6 +9,8 @@ export interface ReadyIssue {
   number: number;
   title: string;
   url: string;
+  /** Still-open issue numbers referenced via "Blocked by #N" in the body. Empty = dispatchable. */
+  blockedBy: number[];
 }
 
 /** An issue to create on the Project's GitHub issue tracker (e.g. an approved PRD). */

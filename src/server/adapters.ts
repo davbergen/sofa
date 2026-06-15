@@ -14,7 +14,6 @@ import type {
   ContainerAdapter,
   GitHubAdapter,
   OpenPrForIssue,
-  ReadyIssue,
   WorkerEvent,
 } from './ports.js';
 import { coerceUsage } from './usage.js';
@@ -44,6 +43,26 @@ function exec(cmd: string, args: string[], cwd?: string): Promise<ExecResult> {
 export const READY_LABEL = process.env.SOFA_READY_LABEL ?? 'ready-for-agent';
 
 /**
+ * Parses all issue numbers from `Blocked by #N` declarations in an issue body.
+ * Case-insensitive; handles comma/space-separated lists; deduplicates.
+ */
+export function parseBlockedBy(body: string): number[] {
+  const seen = new Set<number>();
+  // Match "Blocked by" followed by one or more #N references separated by commas/spaces.
+  const lineRe = /blocked\s+by\s+(#\d+(?:\s*,\s*#\d+)*)/gi;
+  let lineMatch: RegExpExecArray | null;
+  while ((lineMatch = lineRe.exec(body)) !== null) {
+    const refs = lineMatch[1];
+    const numRe = /#(\d+)/g;
+    let numMatch: RegExpExecArray | null;
+    while ((numMatch = numRe.exec(refs)) !== null) {
+      seen.add(Number(numMatch[1]));
+    }
+  }
+  return [...seen];
+}
+
+/**
  * Label that marks a GitHub issue as a PRD. PRDs aren't dispatchable, so they
  * must never appear in Ready Issues even if mislabelled `ready-for-agent`.
  * Mirrors PRD_LABEL in app.ts; duplicated here to avoid a server→app import.
@@ -61,18 +80,38 @@ export function ghGitHubAdapter(): GitHubAdapter {
     },
 
     async listReadyIssues(dir) {
-      const res = await exec(
-        'gh',
-        ['issue', 'list', '--state', 'open', '--label', READY_LABEL, '--json', 'number,title,url,labels'],
-        dir,
-      );
+      const [res, openRes] = await Promise.all([
+        exec(
+          'gh',
+          ['issue', 'list', '--state', 'open', '--label', READY_LABEL, '--json', 'number,title,url,labels,body'],
+          dir,
+        ),
+        exec('gh', ['issue', 'list', '--state', 'open', '--json', 'number', '--limit', '1000'], dir),
+      ]);
       if (res.code !== 0) {
         throw new Error(`gh issue list failed (exit ${res.code}): ${res.stderr.trim().slice(0, 300)}`);
       }
-      const rows = JSON.parse(res.stdout) as Array<ReadyIssue & { labels: Array<{ name: string }> }>;
+      if (openRes.code !== 0) {
+        throw new Error(`gh issue list (open set) failed (exit ${openRes.code}): ${openRes.stderr.trim().slice(0, 300)}`);
+      }
+      const openSet = new Set<number>(
+        (JSON.parse(openRes.stdout) as Array<{ number: number }>).map((r) => r.number),
+      );
+      const rows = JSON.parse(res.stdout) as Array<{
+        number: number;
+        title: string;
+        url: string;
+        labels: Array<{ name: string }>;
+        body: string;
+      }>;
       return rows
         .filter((row) => !row.labels.some((l) => l.name === PRD_LABEL))
-        .map(({ number, title, url }) => ({ number, title, url }));
+        .map(({ number, title, url, body }) => ({
+          number,
+          title,
+          url,
+          blockedBy: parseBlockedBy(body ?? '').filter((n) => openSet.has(n)),
+        }));
     },
 
     async createIssue(dir, issue) {
