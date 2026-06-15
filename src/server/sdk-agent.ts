@@ -173,6 +173,12 @@ export class SdkAgent implements Agent {
         return { behavior: 'allow', updatedInput: input };
       }
 
+      if (toolName === 'FileIssue' || toolName.endsWith('__FileIssue')) {
+        const { title, body } = input as { title?: string; body?: string };
+        out.push({ type: 'file_issue_draft', title: title ?? '', body: body ?? '' });
+        return { behavior: 'allow', updatedInput: input };
+      }
+
       out.push({ type: 'permission_request', requestId: toolUseID, toolName, input });
       const decision = await raceAbort<PermissionDecision>(
         (resolve) => pendingDecisions.set(toolUseID, resolve),

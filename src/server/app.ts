@@ -768,6 +768,55 @@ export function createApp(
     }
   });
 
+  // File the Session's FileIssue draft (ADR-0011): Sofa applies the
+  // ready-for-agent label so the agent never needs to remember `--label`. The
+  // title and body come from the request (so the UI's confirm/edit step can
+  // tweak the draft before filing) rather than the latest transcript event.
+  app.post('/api/sessions/:sessionId/file-issue', async (c) => {
+    if (!deps) {
+      return c.json({ error: 'GitHub adapter not configured' }, 500);
+    }
+    const sessionId = Number(c.req.param('sessionId'));
+    const session = store.get(sessionId);
+    if (!session) {
+      return c.json({ error: `no Session with id ${sessionId}` }, 404);
+    }
+    const body = await c.req.json().catch(() => null);
+    const title = typeof body?.title === 'string' ? body.title.trim() : '';
+    const issueBody = typeof body?.body === 'string' ? body.body : '';
+    if (!title) {
+      return c.json({ error: 'title is required' }, 400);
+    }
+    const project = db
+      .prepare('SELECT dir FROM open_projects WHERE id = ?')
+      .get(session.projectId) as unknown as { dir: string } | undefined;
+    if (!project) {
+      return c.json({ error: `no Project for Session ${sessionId}` }, 404);
+    }
+    try {
+      const created = await deps.github.createIssue(project.dir, {
+        title,
+        body: issueBody,
+        labels: [READY_LABEL],
+      });
+      return c.json(created, 201);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Mirror the field-note cut endpoint: a fresh repo missing the
+      // ready-for-agent label surfaces as an actionable 422 rather than a raw
+      // gh dump.
+      if (/not found/i.test(message) && message.includes(READY_LABEL)) {
+        return c.json(
+          {
+            error: `the '${READY_LABEL}' label does not exist in this repository; create it and try again`,
+          },
+          422,
+        );
+      }
+      return c.json({ error: `filing the Issue failed: ${message}` }, 502);
+    }
+  });
+
   // Live transcript: replays buffered events, then streams until the Session is done.
   app.get('/api/sessions/:sessionId/events', (c) => {
     const sessionId = Number(c.req.param('sessionId'));
