@@ -9,6 +9,7 @@ import type {
 } from './agent.js';
 import { SessionRun } from './sessions.js';
 import { docWriteFromToolUse } from './doc-writes.js';
+import { HOUSE_POSTURE } from './house-posture.js';
 
 /**
  * Expand a bare skill name to the forms the SDK's `skills` option recognises:
@@ -190,6 +191,12 @@ export class SdkAgent implements Agent {
         canUseTool,
         abortController,
         resume,
+        // Steers every host Session toward grilling rather than implementing
+        // (ADR-0011). The preset+append form keeps the SDK's default Claude
+        // Code system prompt and appends the house posture to it; a bare
+        // string here would replace the default instead of extending it, and
+        // a loaded skill's frontmatter still lands alongside.
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: HOUSE_POSTURE },
         // Make Sofa's in-repo bundled skills (see `sofa-skills/`) loadable
         // by name. Without this, only ~/.claude skills are discoverable and
         // a bundled name like `triage-field-notes` would silently no-op.
