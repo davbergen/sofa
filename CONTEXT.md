@@ -35,7 +35,10 @@ _Avoid_: sidebar, project list, nav
 **Session**:
 A single Claude conversation driven through the Claude Agent SDK, usually with
 one skill loaded. Interactive (supervised) Sessions run on the host against
-the real working copy; only Workers are containerized.
+the real working copy; only Workers are containerized. An interactive Session's
+standing posture is to grill, refine, and file well-specified Issues — not to
+implement. It writes code only when David explicitly and deliberately asks;
+implementation is otherwise the Worker's job.
 _Avoid_: chat, conversation
 
 **Grilling Session**:
@@ -56,7 +59,11 @@ A unit of implementable work, derived from a PRD or cut directly from a
 self-contained Field Note Item. Lives on GitHub — GitHub is the source of truth
 for all tracked work. Both PRDs and Issues physically live as GitHub issues;
 the label is the boundary — an Issue carries `ready-for-agent`, a PRD carries
-`prd`. A PRD is never an Issue.
+`prd`. A PRD is never an Issue. **Self-contained** is a real bar: an Item is
+only cut directly to an Issue when a Worker could implement it with no further
+design decisions from David — in particular, any unresolved UI/visual design
+makes it not self-contained, and the work must be grilled (or filed as a PRD)
+instead.
 _Avoid_: ticket, task
 
 **Dispatchable Issue**:
