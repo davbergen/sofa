@@ -70,6 +70,17 @@ export interface PrdDraftEvent {
   markdown: string;
 }
 
+/**
+ * The Agent proposed a `ready-for-agent` Issue via the `FileIssue` tool. The
+ * tool call only surfaces the draft — Sofa applies the label when David files
+ * it via the matching endpoint. Mirrors `PrdDraftEvent`; see ADR-0011.
+ */
+export interface FileIssueDraftEvent {
+  type: 'file_issue_draft';
+  title: string;
+  body: string;
+}
+
 /** A follow-up user message sent into the running Session (e.g. a PRD revision request), echoed for replay. */
 export interface UserMessageEvent {
   type: 'user_message';
@@ -115,6 +126,7 @@ export type AgentEvent =
   | PermissionRequestEvent
   | PermissionDecisionEvent
   | PrdDraftEvent
+  | FileIssueDraftEvent
   | UserMessageEvent
   | PrdPublishedEvent
   | FileWriteEvent
