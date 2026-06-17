@@ -2,17 +2,25 @@ import { describe, expect, it, vi } from 'vitest';
 
 // Capture the options passed into the SDK's `query` so we can assert that
 // host Sessions go out with the house-posture appended (ADR-0011).
+// createSdkMcpServer and tool pass through unchanged so the sofa MCP server
+// can be instantiated at module load time.
 const queryCalls: Array<{ options: Record<string, unknown> }> = [];
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: (args: { options: Record<string, unknown> }) => {
-    queryCalls.push(args);
-    return (async function* () {
-      // No messages: the SDK stream ends immediately, the Session loop exits
-      // through its `finally` and `out.finish()` closes the events iterator.
-    })();
-  },
-}));
+vi.mock('@anthropic-ai/claude-agent-sdk', async () => {
+  const actual = await vi.importActual<typeof import('@anthropic-ai/claude-agent-sdk')>(
+    '@anthropic-ai/claude-agent-sdk',
+  );
+  return {
+    ...actual,
+    query: (args: { options: Record<string, unknown> }) => {
+      queryCalls.push(args);
+      return (async function* () {
+        // No messages: the SDK stream ends immediately, the Session loop exits
+        // through its `finally` and `out.finish()` closes the events iterator.
+      })();
+    },
+  };
+});
 
 import { SdkAgent } from '../src/server/sdk-agent';
 import { HOUSE_POSTURE } from '../src/server/house-posture';

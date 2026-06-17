@@ -1,4 +1,5 @@
-import { query, type CanUseTool, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, createSdkMcpServer, tool, type CanUseTool, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod/v4';
 import type {
   Agent,
   AgentRunInput,
@@ -10,6 +11,49 @@ import type {
 import { SessionRun } from './sessions.js';
 import { docWriteFromToolUse } from './doc-writes.js';
 import { HOUSE_POSTURE } from './house-posture.js';
+
+// Steering text fed back to the model after it calls FileIssue or PrdDraft.
+// Tells the model the draft is surfaced for review, Sofa owns filing/publishing,
+// and instructs it not to bypass via gh issue create or fabricate an issue number.
+const FILE_ISSUE_STEERING =
+  'The Issue draft has been surfaced to David for review. ' +
+  'Sofa will file it and apply the ready-for-agent label on his confirmation. ' +
+  'Do not run gh issue create, do not re-call this tool for this draft, ' +
+  'and do not claim the issue is filed — no issue number exists yet. ' +
+  'Awaiting confirmation.';
+
+const PRD_DRAFT_STEERING =
+  'The PRD draft has been surfaced to David for review. ' +
+  'Sofa will publish it on his confirmation. ' +
+  'Do not re-call this tool for this draft and do not claim it is published. ' +
+  'Awaiting confirmation.';
+
+// In-process MCP server that exposes FileIssue and PrdDraft as SDK-visible tools
+// (ADR-0011). They surface as mcp__sofa__FileIssue / mcp__sofa__PrdDraft, caught
+// by the __FileIssue / __PrdDraft suffix checks in canUseTool. alwaysLoad: true
+// ensures the tools are never deferred behind tool-search.
+export const sofaMcpServer = createSdkMcpServer({
+  name: 'sofa',
+  alwaysLoad: true,
+  tools: [
+    tool(
+      'FileIssue',
+      'File an Issue for implementation. Sofa applies the ready-for-agent label on confirmation.',
+      { title: z.string(), body: z.string() },
+      async () => ({
+        content: [{ type: 'text' as const, text: FILE_ISSUE_STEERING }],
+      }),
+    ),
+    tool(
+      'PrdDraft',
+      'Surface a PRD draft for review. Sofa publishes it on confirmation.',
+      { title: z.string(), markdown: z.string() },
+      async () => ({
+        content: [{ type: 'text' as const, text: PRD_DRAFT_STEERING }],
+      }),
+    ),
+  ],
+});
 
 /**
  * Expand a bare skill name to the forms the SDK's `skills` option recognises:
@@ -179,6 +223,21 @@ export class SdkAgent implements Agent {
         return { behavior: 'allow', updatedInput: input };
       }
 
+      // Narrow deny guard (defence-in-depth, ADR-0011): redirect the common
+      // mislabelling path to FileIssue without imposing a blunt capability wall.
+      // Intentionally narrow — reads, comments, and gh issue list still pass.
+      if (toolName === 'Bash') {
+        const { command } = input as { command?: string };
+        const cmd = command ?? '';
+        if (/gh\s+issue\s+create/.test(cmd) || /gh\s+api\b.*\bPOST\b.*\/issues/.test(cmd)) {
+          return {
+            behavior: 'deny',
+            message:
+              'Use the FileIssue tool to file Issues — it applies the ready-for-agent label automatically. Do not use gh issue create.',
+          };
+        }
+      }
+
       out.push({ type: 'permission_request', requestId: toolUseID, toolName, input });
       const decision = await raceAbort<PermissionDecision>(
         (resolve) => pendingDecisions.set(toolUseID, resolve),
@@ -203,6 +262,9 @@ export class SdkAgent implements Agent {
         // string here would replace the default instead of extending it, and
         // a loaded skill's frontmatter still lands alongside.
         systemPrompt: { type: 'preset', preset: 'claude_code', append: HOUSE_POSTURE },
+        // Register the in-process sofa MCP server so FileIssue and PrdDraft
+        // are visible to the model as mcp__sofa__* tools (ADR-0011).
+        mcpServers: { sofa: sofaMcpServer },
         // Make Sofa's in-repo bundled skills (see `sofa-skills/`) loadable
         // by name. Without this, only ~/.claude skills are discoverable and
         // a bundled name like `triage-field-notes` would silently no-op.
