@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { openDb } from '../src/server/db';
-import { createApp, PRD_LABEL, type AppDeps } from '../src/server/app';
+import { createApp, PRD_LABEL, AUTOMERGE_LABEL, type AppDeps } from '../src/server/app';
 import { READY_LABEL } from '../src/server/adapters';
 import { FakeAgent } from '../src/server/fake-agent';
 import type { ContainerAdapter, GitHubAdapter } from '../src/server/ports';
@@ -128,7 +128,7 @@ describe('opening a Project', () => {
 });
 
 describe('ensuring convention labels on open', () => {
-  it('ensures the ready-for-agent and prd labels exist when a Project opens', async () => {
+  it('ensures the ready-for-agent, prd, and automerge labels exist when a Project opens', async () => {
     const { github, ensured } = fakeGitHub();
     const app = makeAppWith(github);
     const dir = makeDir();
@@ -136,7 +136,7 @@ describe('ensuring convention labels on open', () => {
     const res = await open(app, dir);
 
     expect(res.status).toBe(201);
-    expect(ensured).toEqual([{ dir, labels: [READY_LABEL, PRD_LABEL] }]);
+    expect(ensured).toEqual([{ dir, labels: [READY_LABEL, PRD_LABEL, AUTOMERGE_LABEL] }]);
   });
 
   it('opens the Project even when ensuring labels fails (non-fatal)', async () => {

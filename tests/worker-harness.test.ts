@@ -108,6 +108,7 @@ describe('runWorker', () => {
     const prCall = calls.find((c) => c.startsWith('gh pr create'));
     expect(prCall).toContain('--head issue-7-worker');
     expect(prCall).toContain('Closes #7');
+    expect(prCall).toContain('--label automerge');
     // The agent saw the clone and the one Issue it must implement.
     expect(seen[0]).toBe('/work/repo');
     expect(seen[1]).toContain('issue #7');
