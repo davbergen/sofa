@@ -25,11 +25,15 @@ interface ExecResult {
 }
 
 /** Runs a command without a shell; never throws, failures surface via code. */
-function exec(cmd: string, args: string[], cwd?: string): Promise<ExecResult> {
+export function exec(cmd: string, args: string[], cwd?: string): Promise<ExecResult> {
   return new Promise((resolve) => {
-    // shell: true on Windows so PATH entries registered by installers (Docker,
-    // gh, git) are visible; keep shell: false on Linux/macOS (production).
-    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+    // shell: false on every platform — including Windows — so Node passes argv
+    // entries to the child verbatim. With shell: true, cmd.exe re-splits each
+    // argument on whitespace, which breaks any `gh --title "two words"` /
+    // `--body "with spaces"` invocation (and quotes, %, &). Windows
+    // CreateProcess auto-appends `.exe` and walks PATH, so `gh`/`git`/`docker`
+    // still resolve without a shell — do not "fix" this back to shell: true.
+    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
