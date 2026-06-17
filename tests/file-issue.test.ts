@@ -8,20 +8,28 @@ import { READY_LABEL } from '../src/server/adapters';
 import { FakeAgent } from '../src/server/fake-agent';
 import type { ContainerAdapter, GitHubAdapter, NewIssue } from '../src/server/ports';
 
-// Capture options + return one synthetic FileIssue tool_use so the canUseTool
-// interception path runs against a real SdkAgent.
+// Capture options + return an empty stream so canUseTool interception runs against
+// a real SdkAgent. createSdkMcpServer and tool pass through so the sofa MCP server
+// is created with real handlers and can be inspected in assertions.
 const queryCalls: Array<{ options: Record<string, unknown> }> = [];
 
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: (args: { options: { canUseTool: unknown } }) => {
-    queryCalls.push(args as { options: Record<string, unknown> });
-    return (async function* () {
-      // Empty stream — the interception is driven directly via canUseTool below.
-    })();
-  },
-}));
+vi.mock('@anthropic-ai/claude-agent-sdk', async () => {
+  const actual = await vi.importActual<typeof import('@anthropic-ai/claude-agent-sdk')>(
+    '@anthropic-ai/claude-agent-sdk',
+  );
+  return {
+    ...actual,
+    query: (args: { options: Record<string, unknown> }) => {
+      queryCalls.push(args);
+      return (async function* () {
+        // Empty stream — interception is driven directly via canUseTool below.
+      })();
+    },
+  };
+});
 
 import { SdkAgent } from '../src/server/sdk-agent';
+import { HOUSE_POSTURE } from '../src/server/house-posture';
 
 describe('SdkAgent FileIssue interception', () => {
   it('surfaces a file_issue_draft event and allows the tool without prompting', async () => {
@@ -75,6 +83,121 @@ describe('SdkAgent FileIssue interception', () => {
     const events: Array<{ type: string }> = [];
     for await (const event of session.events) events.push(event);
     expect(events.some((e) => e.type === 'file_issue_draft')).toBe(true);
+  });
+});
+
+// Shared CanUseTool type used across the new test suites below.
+type CanUseToolFn = (
+  name: string,
+  input: Record<string, unknown>,
+  ctx: { toolUseID: string; signal: AbortSignal },
+) => Promise<{ behavior: 'allow' | 'deny'; updatedInput?: Record<string, unknown>; message?: string }>;
+
+describe('sofa MCP server registration', () => {
+  it('registers a sofa MCP server in query() options with FileIssue, PrdDraft, and alwaysLoad', () => {
+    queryCalls.length = 0;
+    const agent = new SdkAgent();
+    agent.run({ prompt: 'go', cwd: '/tmp' });
+
+    const mcpServers = queryCalls[0].options.mcpServers as Record<
+      string,
+      { type: string; name: string; instance: { _registeredTools: Record<string, { _meta?: Record<string, unknown> }> } }
+    >;
+    expect(mcpServers).toBeDefined();
+    expect(mcpServers['sofa']).toBeDefined();
+    expect(mcpServers['sofa'].type).toBe('sdk');
+
+    const tools = mcpServers['sofa'].instance._registeredTools;
+    expect(Object.keys(tools)).toContain('FileIssue');
+    expect(Object.keys(tools)).toContain('PrdDraft');
+    expect(tools['FileIssue']._meta?.['anthropic/alwaysLoad']).toBe(true);
+    expect(tools['PrdDraft']._meta?.['anthropic/alwaysLoad']).toBe(true);
+  });
+
+  it('FileIssue handler returns surfaced-awaiting-confirmation steering text without an issue number', async () => {
+    queryCalls.length = 0;
+    const agent = new SdkAgent();
+    agent.run({ prompt: 'go', cwd: '/tmp' });
+
+    const mcpServers = queryCalls[0].options.mcpServers as Record<
+      string,
+      { instance: { _registeredTools: Record<string, { handler: (args: Record<string, string>) => Promise<{ content: Array<{ type: string; text: string }> }> }> } }
+    >;
+    const handler = mcpServers['sofa'].instance._registeredTools['FileIssue'].handler;
+    const result = await handler({ title: 'Add dark mode', body: 'Toggle in header' });
+
+    expect(result.content[0].type).toBe('text');
+    const text = result.content[0].text;
+    expect(text).toMatch(/surfaced/i);
+    expect(text).toMatch(/confirmation/i);
+    expect(text).not.toMatch(/#\d+/); // no fabricated issue number
+    expect(text).toMatch(/do not.*gh issue create/i);
+  });
+
+  it('PrdDraft handler returns surfaced-awaiting-confirmation steering text', async () => {
+    queryCalls.length = 0;
+    const agent = new SdkAgent();
+    agent.run({ prompt: 'go', cwd: '/tmp' });
+
+    const mcpServers = queryCalls[0].options.mcpServers as Record<
+      string,
+      { instance: { _registeredTools: Record<string, { handler: (args: Record<string, string>) => Promise<{ content: Array<{ type: string; text: string }> }> }> } }
+    >;
+    const handler = mcpServers['sofa'].instance._registeredTools['PrdDraft'].handler;
+    const result = await handler({ title: 'New feature PRD', markdown: '## Overview\n...' });
+
+    expect(result.content[0].type).toBe('text');
+    const text = result.content[0].text;
+    expect(text).toMatch(/surfaced/i);
+    expect(text).toMatch(/confirmation/i);
+    expect(text).not.toMatch(/#\d+/);
+  });
+});
+
+describe('HOUSE_POSTURE tool names', () => {
+  it('names FileIssue and PrdDraft as the only path to file Issues and surface PRDs', () => {
+    expect(HOUSE_POSTURE).toContain('FileIssue');
+    expect(HOUSE_POSTURE).toContain('PrdDraft');
+  });
+});
+
+describe('canUseTool Bash deny guard', () => {
+  it('denies gh issue create and redirects to FileIssue', async () => {
+    queryCalls.length = 0;
+    const agent = new SdkAgent();
+    agent.run({ prompt: 'go', cwd: '/tmp' });
+    const canUseTool = queryCalls[0].options.canUseTool as CanUseToolFn;
+
+    const result = await canUseTool(
+      'Bash',
+      { command: 'gh issue create --title "Add X" --body "Details"' },
+      { toolUseID: 'tu_deny', signal: new AbortController().signal },
+    );
+
+    expect(result.behavior).toBe('deny');
+    expect(result.message).toContain('FileIssue');
+  });
+
+  it('allows gh issue list through to the normal permission flow', async () => {
+    queryCalls.length = 0;
+    const agent = new SdkAgent();
+    const session = agent.run({ prompt: 'go', cwd: '/tmp' });
+    const canUseTool = queryCalls[0].options.canUseTool as CanUseToolFn;
+
+    const listPromise = canUseTool(
+      'Bash',
+      { command: 'gh issue list --label ready-for-agent' },
+      { toolUseID: 'tu_list', signal: new AbortController().signal },
+    );
+    // Resolve the pending permission decision so the call returns.
+    session.decidePermission('tu_list', 'allow');
+    const result = await listPromise;
+
+    expect(result.behavior).toBe('allow');
+    session.close();
+    // Drain events.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const _ of session.events) { /* no-op */ }
   });
 });
 
