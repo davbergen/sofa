@@ -100,6 +100,7 @@ body {
   padding: 22px 16px 22px 18px;
   border-right: 1px solid var(--line);
   background: linear-gradient(180deg, #1a1410, #14100c);
+  transition: flex-basis 0.2s ease;
 }
 .cz-railhead {
   display: flex;
@@ -2478,4 +2479,86 @@ body {
   border-radius: 6px;
   padding: 3px 6px;
   font-size: 12px;
+}
+
+/* ---- Collapsible Project Rail (#154) ---------------------------------- *
+ * .cz-projrail.collapsed shrinks to a 56px icon-only strip. The toggle
+ * chevron lives in the brand header in both states. */
+.cz-rail-toggle {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--tx3);
+  font-family: 'Spline Sans Mono', monospace;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.cz-rail-toggle:hover {
+  color: var(--cream);
+  border-color: var(--seam);
+}
+.cz-railhead .cz-rail-toggle {
+  margin-left: auto;
+}
+.cz-projrail.collapsed {
+  flex: 0 0 56px;
+  padding: 22px 4px;
+}
+.cz-projrail.collapsed .cz-railhead {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 8px;
+}
+.cz-projrail.collapsed .cz-railhead .cz-rail-toggle {
+  margin-left: 0;
+}
+.cz-projrail.collapsed .cz-railhead .cz-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.cz-projrail.collapsed .cz-railhead .cz-logo svg {
+  width: 22px;
+  height: 22px;
+}
+.cz-projrail.collapsed .cz-rail-item .meta {
+  display: none;
+}
+.cz-projrail.collapsed .cz-rail-item {
+  justify-content: center;
+  padding: 10px 6px;
+}
+.cz-projrail.collapsed .cz-rail-close {
+  display: none;
+}
+.cz-projrail.collapsed .cz-rail-empty {
+  display: none;
+}
+.cz-rail-open-collapsed {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 36px;
+  background: transparent;
+  border: 1.5px dashed var(--seam);
+  border-radius: 10px;
+  color: var(--tx2);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+.cz-rail-open-collapsed:hover {
+  color: var(--cream);
+  border-color: var(--tan-d);
 }

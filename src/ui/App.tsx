@@ -1303,6 +1303,22 @@ export function App() {
   // Dashboards are expanded by default; this tracks the ones the user collapsed.
   const [hiddenDashboards, setHiddenDashboards] = useState<Record<number, boolean>>({});
 
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('sofa.railCollapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  function toggleRail() {
+    setRailCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('sofa.railCollapsed', String(next)); } catch { /* storage unavailable */ }
+      return next;
+    });
+  }
+
   const promptFor = (id: number) => prompts[id] ?? '';
 
   async function refresh() {
@@ -1716,15 +1732,26 @@ export function App() {
 
   return (
     <div className="cz-shell">
-      <aside className="cz-projrail" aria-label="Project Rail">
+      <aside className={`cz-projrail${railCollapsed ? ' collapsed' : ''}`} aria-label="Project Rail">
         <div className="cz-railhead">
           <div className="cz-logo">
             <SofaMark size={28} stroke="currentColor" />
           </div>
-          <div>
-            <h1 className="cz-word">Sofa</h1>
-            <div className="cz-sub">software factory</div>
-          </div>
+          {!railCollapsed && (
+            <div>
+              <h1 className="cz-word">Sofa</h1>
+              <div className="cz-sub">software factory</div>
+            </div>
+          )}
+          <button
+            type="button"
+            className="cz-rail-toggle"
+            aria-expanded={!railCollapsed}
+            aria-label={railCollapsed ? 'Expand Project Rail' : 'Collapse Project Rail'}
+            onClick={toggleRail}
+          >
+            {railCollapsed ? '»' : '«'}
+          </button>
         </div>
 
         <nav className="cz-rail-list" aria-label="Open Projects">
@@ -1742,6 +1769,7 @@ export function App() {
                       role="tab"
                       aria-selected={isActive}
                       aria-label={`Project ${p.name}${isActive ? ' (Active)' : ''}`}
+                      title={railCollapsed ? p.name : undefined}
                       className={`cz-rail-item${isActive ? ' active' : ''}`}
                       onClick={() => setActiveProjectId(p.id)}
                     >
@@ -1772,23 +1800,35 @@ export function App() {
           )}
         </nav>
 
-        <form onSubmit={openProject} className="cz-rail-open">
-          <input
-            aria-label="Project directory"
-            className="cz-field"
-            placeholder="▸ C:\path\to\project"
-            value={dir}
-            onChange={(e) => setDir(e.target.value)}
-          />
-          <div className="cz-rail-open-actions">
-            <button type="button" className="cz-btn" onClick={() => setBrowsing(true)}>
-              Browse…
-            </button>
-            <button type="submit" className="cz-btn tan" disabled={!dir.trim()}>
-              Open Project
-            </button>
-          </div>
-        </form>
+        {railCollapsed ? (
+          <button
+            type="button"
+            className="cz-rail-open-collapsed"
+            aria-label="Open Project — expand rail"
+            title="Open Project"
+            onClick={toggleRail}
+          >
+            +
+          </button>
+        ) : (
+          <form onSubmit={openProject} className="cz-rail-open">
+            <input
+              aria-label="Project directory"
+              className="cz-field"
+              placeholder="▸ C:\path\to\project"
+              value={dir}
+              onChange={(e) => setDir(e.target.value)}
+            />
+            <div className="cz-rail-open-actions">
+              <button type="button" className="cz-btn" onClick={() => setBrowsing(true)}>
+                Browse…
+              </button>
+              <button type="submit" className="cz-btn tan" disabled={!dir.trim()}>
+                Open Project
+              </button>
+            </div>
+          </form>
+        )}
       </aside>
 
       <main className="cz-main">
