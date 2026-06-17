@@ -122,8 +122,13 @@ _Avoid_: triage (the skill/role, not this action), processing (vague), notes-to-
 The verdict Process Notes attaches to a Field Note Item: either **Grill** (the
 Item hides unresolved design and should be escalated to a Grilling Session) or
 **Cut** (the Item is self-contained and can be filed directly as an Issue), with
-a one-line rationale. It mirrors the Item's two existing actions rather than
-introducing a parallel vocabulary, and is purely advisory — David may take
-either action regardless, and acting on an Item supersedes its Recommendation.
-Defaults to Grill when the call is uncertain.
+a one-line rationale. Alongside the verdict it also drafts a suggested Issue
+**title and body** for the Item — a cleaned-up reading of the terse note — which
+pre-fills the Create Issue step so cutting is a tweak-and-file rather than a
+rewrite. The draft is advisory and always editable, best-effort (an Item may
+carry only the verdict and fall back to the raw note text), and attached to
+every Item regardless of which action is recommended. It mirrors the Item's two
+existing actions rather than introducing a parallel vocabulary, and is purely
+advisory — David may take either action regardless, and acting on an Item
+supersedes its Recommendation. Defaults to Grill when the call is uncertain.
 _Avoid_: verdict, classification, label (overloaded with GitHub labels), refine/implement (say Grill/Cut)
