@@ -418,6 +418,7 @@ export async function runWorker(
     '--head', branch,
     '--title', issueTitle,
     '--body', `Closes #${env.issue}\n\nOpened by a Sofa Worker.`,
+    '--label', 'automerge',
   ];
   if (env.baseBranch) {
     prArgs.push('--base', env.baseBranch);

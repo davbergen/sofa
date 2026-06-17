@@ -96,6 +96,15 @@ const RUN_COLUMNS =
 /** Label applied to every published PRD on the Project's GitHub issue tracker. */
 export const PRD_LABEL = 'prd';
 
+/**
+ * Label that gates the `automerge` workflow. The Worker applies this to every PR
+ * it opens so the workflow self-merges on a green gate. The literal string is
+ * also hardcoded in `.github/workflows/automerge.yml` and in the Worker bundle
+ * (which is compiled separately and cannot import this constant) — renaming
+ * here requires editing both.
+ */
+export const AUTOMERGE_LABEL = 'automerge';
+
 const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
@@ -268,7 +277,7 @@ export function createApp(
     // not a block.
     if (deps?.github) {
       try {
-        await deps.github.ensureLabels(abs, [READY_LABEL, PRD_LABEL]);
+        await deps.github.ensureLabels(abs, [READY_LABEL, PRD_LABEL, AUTOMERGE_LABEL]);
       } catch (err) {
         console.warn(
           `could not ensure convention labels for ${abs}: ${err instanceof Error ? err.message : String(err)}`,
