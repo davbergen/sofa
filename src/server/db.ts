@@ -118,6 +118,12 @@ const MIGRATIONS: string[] = [
   // nullable — Items unclassified or already acted carry NULL.
   `ALTER TABLE field_note_items ADD COLUMN recommendation TEXT;
   ALTER TABLE field_note_items ADD COLUMN rationale TEXT`,
+  // Suggested Issue title and body drafted by the triage skill (#161): pre-fills
+  // the Create Issue step so cutting is tweak-and-file rather than rewrite. Both
+  // nullable — a verdict may carry only recommendation/rationale and the UI falls
+  // back to the raw note text when absent.
+  `ALTER TABLE field_note_items ADD COLUMN suggested_title TEXT;
+  ALTER TABLE field_note_items ADD COLUMN suggested_body TEXT`,
 ];
 
 export function openDb(path: string): DatabaseSync {

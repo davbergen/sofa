@@ -62,8 +62,15 @@ async function processNotes(app: ReturnType<typeof makeApp>, projectId: number) 
   return app.request(`/api/projects/${projectId}/process-notes`, { method: 'POST' });
 }
 
-/** Builds a strict-contract triage payload keyed by Item ids. */
-function triagePayload(map: Record<string, { recommendation: 'grill' | 'issue'; rationale: string }>) {
+/** Builds a triage payload keyed by Item ids, optionally with suggested draft fields. */
+function triagePayload(
+  map: Record<string, {
+    recommendation: 'grill' | 'issue';
+    rationale: string;
+    suggestedTitle?: string;
+    suggestedBody?: string;
+  }>,
+) {
   return JSON.stringify(map);
 }
 
@@ -332,5 +339,95 @@ describe('Process Notes — one-shot triage run', () => {
     const app = makeApp(agent);
     const res = await processNotes(app, 999);
     expect(res.status).toBe(404);
+  });
+
+  it('persists suggestedTitle and suggestedBody when the skill includes them', async () => {
+    const agent = new FakeAgent([], {
+      oneShot: (input) => {
+        const items = JSON.parse(input.prompt) as Array<{ id: string; text: string }>;
+        const out: Record<string, object> = {};
+        for (const item of items) {
+          out[item.id] = {
+            recommendation: 'issue',
+            rationale: 'Self-contained slice.',
+            suggestedTitle: 'Add dark mode toggle',
+            suggestedBody: 'Add a toggle to switch between light and dark mode in the settings panel.',
+          };
+        }
+        return { text: triagePayload(out as never) };
+      },
+    });
+    const app = makeApp(agent);
+    const project = await openProject(app, makeDir());
+    await dropNote(app, project.id, '1. dark mode toggle');
+
+    const res = await processNotes(app, project.id);
+    expect(res.status).toBe(200);
+    const notes = await res.json();
+    expect(notes.items[0]).toMatchObject({
+      recommendation: 'issue',
+      rationale: 'Self-contained slice.',
+      suggestedTitle: 'Add dark mode toggle',
+      suggestedBody: 'Add a toggle to switch between light and dark mode in the settings panel.',
+    });
+  });
+
+  it('succeeds and stores null drafts when the skill omits suggestedTitle and suggestedBody', async () => {
+    const agent = new FakeAgent([], {
+      oneShot: (input) => {
+        const items = JSON.parse(input.prompt) as Array<{ id: string }>;
+        const out: Record<string, object> = {};
+        for (const item of items) {
+          out[item.id] = { recommendation: 'grill', rationale: 'Needs design discussion.' };
+        }
+        return { text: triagePayload(out as never) };
+      },
+    });
+    const app = makeApp(agent);
+    const project = await openProject(app, makeDir());
+    await dropNote(app, project.id, '1. something vague');
+
+    const res = await processNotes(app, project.id);
+    expect(res.status).toBe(200);
+    const notes = await res.json();
+    expect(notes.items[0]).toMatchObject({
+      recommendation: 'grill',
+      rationale: 'Needs design discussion.',
+      suggestedTitle: null,
+      suggestedBody: null,
+    });
+  });
+
+  it('suggestedTitle and suggestedBody survive a page reload', async () => {
+    const db = openDb(':memory:');
+    const agent = new FakeAgent([], {
+      oneShot: (input) => {
+        const items = JSON.parse(input.prompt) as Array<{ id: string }>;
+        const out: Record<string, object> = {};
+        for (const item of items) {
+          out[item.id] = {
+            recommendation: 'issue',
+            rationale: 'Clear slice.',
+            suggestedTitle: 'Fix header alignment',
+            suggestedBody: 'The header is misaligned on mobile viewports.',
+          };
+        }
+        return { text: triagePayload(out as never) };
+      },
+    });
+    const deps = { github: noopGithub(), container: noopContainer };
+    const app = createApp(db, agent, deps);
+    const project = await openProject(app, makeDir());
+    await dropNote(app, project.id, '1. fix header');
+
+    await processNotes(app, project.id);
+
+    // Simulate reload: a fresh app over the same DB.
+    const reborn = createApp(db, new FakeAgent(), deps);
+    const notes = await getNotes(reborn, project.id);
+    expect(notes.items[0]).toMatchObject({
+      suggestedTitle: 'Fix header alignment',
+      suggestedBody: 'The header is misaligned on mobile viewports.',
+    });
   });
 });

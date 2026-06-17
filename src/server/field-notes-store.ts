@@ -13,6 +13,9 @@ export interface FieldNoteItem {
   /** Process Notes verdict for this Item, if it has been classified. */
   recommendation: 'grill' | 'issue' | null;
   rationale: string | null;
+  /** Suggested Issue title/body drafted by the triage skill — pre-fills Create Issue. */
+  suggestedTitle: string | null;
+  suggestedBody: string | null;
 }
 
 export interface FieldNotes {
@@ -35,10 +38,12 @@ interface ItemRow {
   issue_url: string | null;
   recommendation: string | null;
   rationale: string | null;
+  suggested_title: string | null;
+  suggested_body: string | null;
 }
 
 const ITEM_COLUMNS =
-  'id, text, acted, action, session_id, issue_number, issue_url, recommendation, rationale';
+  'id, text, acted, action, session_id, issue_number, issue_url, recommendation, rationale, suggested_title, suggested_body';
 
 function toItem(row: ItemRow): FieldNoteItem {
   return {
@@ -51,6 +56,8 @@ function toItem(row: ItemRow): FieldNoteItem {
     issueUrl: row.issue_url,
     recommendation: row.recommendation as 'grill' | 'issue' | null,
     rationale: row.rationale,
+    suggestedTitle: row.suggested_title,
+    suggestedBody: row.suggested_body,
   };
 }
 
@@ -195,25 +202,40 @@ export class FieldNotesStore {
 
   /**
    * Writes Process Notes verdicts to a batch of Items in one transaction, only
-   * overwriting `recommendation`/`rationale` on Items that are still unacted
-   * (acting on an Item supersedes its Recommendation, per ADR 0010). Items
-   * referenced by id but not belonging to the Project, or already acted, are
-   * silently skipped — the caller already filtered to unacted Items, this is
-   * defence in depth.
+   * overwriting `recommendation`/`rationale`/`suggested_title`/`suggested_body`
+   * on Items that are still unacted (acting on an Item supersedes its
+   * Recommendation, per ADR 0010). Items referenced by id but not belonging to
+   * the Project, or already acted, are silently skipped. `suggestedTitle` and
+   * `suggestedBody` are optional — absent fields are stored as NULL so the UI
+   * falls back gracefully to the raw note text.
    */
   writeRecommendations(
     projectId: number,
-    verdicts: Array<{ itemId: number; recommendation: 'grill' | 'issue'; rationale: string }>,
+    verdicts: Array<{
+      itemId: number;
+      recommendation: 'grill' | 'issue';
+      rationale: string;
+      suggestedTitle?: string | null;
+      suggestedBody?: string | null;
+    }>,
   ): void {
     this.db.exec('BEGIN');
     try {
       const update = this.db.prepare(
-        `UPDATE field_note_items SET recommendation = ?, rationale = ?
+        `UPDATE field_note_items
+         SET recommendation = ?, rationale = ?, suggested_title = ?, suggested_body = ?
          WHERE id = ? AND acted = 0
            AND note_id IN (SELECT id FROM field_notes WHERE project_id = ?)`,
       );
       for (const v of verdicts) {
-        update.run(v.recommendation, v.rationale, v.itemId, projectId);
+        update.run(
+          v.recommendation,
+          v.rationale,
+          v.suggestedTitle ?? null,
+          v.suggestedBody ?? null,
+          v.itemId,
+          projectId,
+        );
       }
       this.db.exec('COMMIT');
     } catch (err) {
