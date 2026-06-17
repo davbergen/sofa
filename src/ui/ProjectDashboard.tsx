@@ -10,6 +10,8 @@ interface FieldNoteItem {
   issueUrl: string | null;
   recommendation: 'grill' | 'issue' | null;
   rationale: string | null;
+  suggestedTitle: string | null;
+  suggestedBody: string | null;
 }
 
 interface FieldNotes {
@@ -806,8 +808,8 @@ export function ProjectDashboard({
                         onClick={() =>
                           setFiling({
                             id: item.id,
-                            title: item.text.split('\n')[0],
-                            body: item.text,
+                            title: item.suggestedTitle ?? item.text.split('\n')[0],
+                            body: item.suggestedBody ?? item.text,
                           })
                         }
                         aria-label={item.recommendation === 'issue' ? 'Create Issue (recommended)' : 'Create Issue'}

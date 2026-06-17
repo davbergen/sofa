@@ -108,21 +108,30 @@ export const AUTOMERGE_LABEL = 'automerge';
 const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
- * Parses the `triage-field-notes` skill's strict output contract: one JSON
- * object keyed by the input Item ids, each value `{recommendation, rationale}`
- * with recommendation ∈ `'grill' | 'issue'`. The skill prompt instructs the
- * model to emit "exactly one JSON object, and nothing else that competes to be
- * the result", but real runs may wrap the object in prose; the first balanced
- * `{...}` block is extracted before parsing. Returns `null` (zero verdicts
- * written upstream) when:
+ * Parses the `triage-field-notes` skill's output contract: one JSON object
+ * keyed by the input Item ids, each value `{recommendation, rationale}` with
+ * recommendation ∈ `'grill' | 'issue'`, plus optional `suggestedTitle` and
+ * `suggestedBody` strings. The skill prompt instructs the model to emit
+ * "exactly one JSON object, and nothing else that competes to be the result",
+ * but real runs may wrap the object in prose; the first balanced `{...}` block
+ * is extracted before parsing. Returns `null` (zero verdicts written upstream)
+ * when:
  *   - no JSON object is parseable,
  *   - any expected id is missing or any extra id appears,
  *   - any verdict has the wrong shape or a recommendation outside the enum.
+ * Missing `suggestedTitle`/`suggestedBody` are stored as null — a verdict
+ * with only `recommendation`/`rationale` is valid; absence never rejects.
  */
 function parseTriageJson(
   text: string,
   expectedIds: number[],
-): Array<{ itemId: number; recommendation: 'grill' | 'issue'; rationale: string }> | null {
+): Array<{
+  itemId: number;
+  recommendation: 'grill' | 'issue';
+  rationale: string;
+  suggestedTitle: string | null;
+  suggestedBody: string | null;
+}> | null {
   const block = extractFirstJsonObject(text);
   if (block === null) return null;
   let parsed: unknown;
@@ -135,7 +144,13 @@ function parseTriageJson(
   const obj = parsed as Record<string, unknown>;
   const expected = new Set(expectedIds.map((n) => String(n)));
   const seen = new Set<string>();
-  const verdicts: Array<{ itemId: number; recommendation: 'grill' | 'issue'; rationale: string }> = [];
+  const verdicts: Array<{
+    itemId: number;
+    recommendation: 'grill' | 'issue';
+    rationale: string;
+    suggestedTitle: string | null;
+    suggestedBody: string | null;
+  }> = [];
   for (const [key, value] of Object.entries(obj)) {
     if (!expected.has(key)) return null;
     if (seen.has(key)) return null;
@@ -148,6 +163,8 @@ function parseTriageJson(
       itemId: Number(key),
       recommendation: v.recommendation,
       rationale: v.rationale,
+      suggestedTitle: typeof v.suggestedTitle === 'string' ? v.suggestedTitle : null,
+      suggestedBody: typeof v.suggestedBody === 'string' ? v.suggestedBody : null,
     });
   }
   if (seen.size !== expected.size) return null;
